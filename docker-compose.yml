@@ -1,0 +1,135 @@
+# Anomalia Platform — Local Development Stack
+#
+# Usage:
+#   cp .env.example .env        # adjust if needed
+#   docker compose up --build
+#
+# Services
+#   azurite              Azure Storage emulator  (Blob :10000 / Queue :10001 / Table :10002)
+#   sql-edge             SQL Server 2022          (required by Service Bus emulator)
+#   servicebus-emulator  Azure Service Bus emulator  (AMQP :5672)
+#   ingestion-func       Python 3.11 Azure Functions  (:7071)
+#   processing-func      .NET 10 Azure Functions      (:7072 → container :80)
+
+services:
+
+  # ── Azure Storage Emulator ──────────────────────────────────────────────────
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.29.0
+    container_name: azurite
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+    ports:
+      - "10000:10000"   # Blob
+      - "10001:10001"   # Queue
+      - "10002:10002"   # Table
+    volumes:
+      - azurite_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 10000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── SQL Server (Service Bus Emulator dependency) ────────────────────────────
+  sql-edge:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sql-edge
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD}"
+    volumes:
+      - sqledge_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/localhost/1433' && echo OK || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── Azure Service Bus Emulator ──────────────────────────────────────────────
+  servicebus-emulator:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    container_name: servicebus-emulator
+    environment:
+      ACCEPT_EULA: "Y"
+      SQL_SERVER: sql-edge
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD}"
+    volumes:
+      - ./servicebus-emulator/config.json:/ServiceBus_Emulator/ConfigFiles/Config.json
+    ports:
+      - "5672:5672"
+    depends_on:
+      sql-edge:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/localhost/5672' && echo OK || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Ingestion Function (Python 3.11) ────────────────────────────────────────
+  ingestion-func:
+    build:
+      context: ./ingestion_func
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: ingestion-func
+    env_file:
+      - .env
+    environment:
+      FUNCTIONS_WORKER_RUNTIME: python
+      # Storage — point to Azurite service (UseDevelopmentStorage=true only resolves 127.0.0.1)
+      AzureWebJobsStorage: "${AZURE_STORAGE_CONNECTION}"
+      TableStorageConnection__tableServiceUri: "http://azurite:10002/devstoreaccount1"
+      # Service Bus — emulator connection string (replaces __fullyQualifiedNamespace for dev)
+      ServiceBusConnection: "${SERVICEBUS_CONNECTION}"
+    ports:
+      - "7071:7071"
+    depends_on:
+      azurite:
+        condition: service_healthy
+      servicebus-emulator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7071/admin/host/status"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  # ── Processing Function (.NET 10) ───────────────────────────────────────────
+  processing-func:
+    build:
+      context: ./processing_func
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: processing-func
+    env_file:
+      - .env
+    environment:
+      FUNCTIONS_WORKER_RUNTIME: dotnet-isolated
+      # Storage — Azurite
+      AzureWebJobsStorage: "${AZURE_STORAGE_CONNECTION}"
+      ADLS_ENDPOINT: "http://azurite:10000/devstoreaccount1"
+      ONELAKE_ENDPOINT: "http://azurite:10000/devstoreaccount1"
+      SCHEMA_REGISTRY_BLOB_CONNECTION: "${AZURE_STORAGE_CONNECTION}"
+      # Service Bus — emulator connection string
+      ServiceBusConnection: "${SERVICEBUS_CONNECTION}"
+    ports:
+      - "7072:80"
+    depends_on:
+      azurite:
+        condition: service_healthy
+      servicebus-emulator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/admin/host/ping"]
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
+
+volumes:
+  azurite_data:
+  sqledge_data:
