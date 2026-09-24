@@ -1,0 +1,6 @@
+# Local environment (emulator settings) - use .env.example
+.env
+
+# Python / notebooks
+__pycache__/
+.ipynb_checkpoints/
