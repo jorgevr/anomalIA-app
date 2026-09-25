@@ -8,14 +8,14 @@
 #   azurite              Azure Storage emulator  (Blob :10000 / Queue :10001 / Table :10002)
 #   sql-edge             SQL Server 2022          (required by Service Bus emulator)
 #   servicebus-emulator  Azure Service Bus emulator  (AMQP :5672)
-#   ingestion-func       Python 3.11 Azure Functions  (:7071)
+#   ingestion-func       Python 3.11 Azure Functions  (:7071 → container :80)
 #   processing-func      .NET 10 Azure Functions      (:7072 → container :80)
 
 services:
 
   # ── Azure Storage Emulator ──────────────────────────────────────────────────
   azurite:
-    image: mcr.microsoft.com/azure-storage/azurite:3.29.0
+    image: mcr.microsoft.com/azure-storage/azurite:3.37.0
     container_name: azurite
     command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
     ports:
@@ -86,14 +86,26 @@ services:
       # Service Bus — emulator connection string (replaces __fullyQualifiedNamespace for dev)
       ServiceBusConnection: "${SERVICEBUS_CONNECTION}"
     ports:
-      - "7071:7071"
+      # Container listens on :80 (the base image's default), not :7071 — the
+      # previous "7071:7071" mapping pointed at a port nothing was bound to.
+      - "7071:80"
     depends_on:
       azurite:
         condition: service_healthy
       servicebus-emulator:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7071/admin/host/status"]
+      # /admin/host/status requires the function master key and always 401s without
+      # one (Azure Functions admin routes are auth-required by design, even from
+      # loopback, in a containerized host). We don't have that key here, so instead
+      # of the previous /admin/host/ping (which returns 200 as soon as the ASP.NET
+      # pipeline is up — proven to still say 200 while AzureWebJobsStorage was
+      # failing with AuthorizationFailure underneath), require /admin/host/status
+      # to answer at all: only reachable once the WebJobs Script host has finished
+      # initializing (loading functions) and registered its admin auth pipeline.
+      # 200 = authenticated somehow; 401 = host up, key just not supplied here.
+      # Anything else (connection refused, 5xx, timeout) fails the check.
+      test: ["CMD-SHELL", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:80/admin/host/status); test \"$$code\" = \"200\" -o \"$$code\" = \"401\""]
       interval: 30s
       timeout: 5s
       start_period: 30s
@@ -125,7 +137,11 @@ services:
       servicebus-emulator:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/admin/host/ping"]
+      # See ingestion-func's healthcheck comment: /admin/host/ping alone is not a
+      # reliable "functions loaded" signal (confirmed — it stayed 200 while this
+      # host's own /admin/host/status reported "azure.functions.webjobs.storage":
+      # "Unhealthy" underneath). Require /admin/host/status to answer 200 or 401.
+      test: ["CMD-SHELL", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost/admin/host/status); test \"$$code\" = \"200\" -o \"$$code\" = \"401\""]
       interval: 30s
       timeout: 5s
       start_period: 45s
