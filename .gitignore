@@ -1,6 +1,9 @@
 # Local environment (emulator settings) - use .env.example
 .env
 
+# Dev-only Functions host master key (file-based secret storage for local compose)
+infrastructure/functions-secrets/
+
 # Python / notebooks
 __pycache__/
 .ipynb_checkpoints/

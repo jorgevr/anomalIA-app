@@ -155,6 +155,16 @@ Owning repo: **services/ingestion-func**. Gates: `ruff check .` and `pytest` (`d
 Owning repo: **services/processing-func**. Gates: `dotnet format --verify-no-changes`, `dotnet build`,
 `dotnet test` (`docs/agent-fleet.md` §4).
 
+**Execution order:** R3.6 first (the local stack cannot get past the storage client until it is done), then R3.1 → R3.5, R3.7 → R3.9. Task IDs are kept stable so ADR references stay valid.
+
+### R3.6 Collapse to the Blob API *(ADR 0005)*
+- **Input:** `Program.cs:94-113`, `AdlsDatasetReader.cs:32-41`, `OneLakeBronzeWriter.cs:45-56`
+- **Output:** `DataLakeServiceClient` removed in favour of the already-registered `BlobServiceClient`;
+  the exact-equality connection-string test at `Program.cs:107-109` replaced by a robust check;
+  OneLake-flavoured names (`ONELAKE_ENDPOINT`, `OneLakeBronzeWriter`) made storage-neutral
+- **Accept:** no reference to `Azure.Storage.Files.DataLake` remains; `dotnet test` passes; the service
+  reads a blob-form `storage_path` end to end.
+
 ### R3.1 Rename the validated layer to `silver` *(ADR 0001)*
 - **Input:** `Program.cs:152`, `OneLakeBronzeWriter.cs`, `ProcessDatasetCommandHandler.cs:117-120`,
   `local.settings.json:15`, `local.settings.json.template:13`, `scripts/seed-azurite.js:13`
@@ -200,15 +210,6 @@ Owning repo: **services/processing-func**. Gates: `dotnet format --verify-no-cha
 - **Accept:** processing a fixture whose rows span two data dates produces exactly two date partitions
   matching those dates, and re-running it changes neither the partition set nor the row counts —
   which fails today, because a re-run would write a new processing-date partition.
-
-### R3.6 Collapse to the Blob API *(ADR 0005)*
-- **Input:** `Program.cs:94-113`, `AdlsDatasetReader.cs:32-41`, `OneLakeBronzeWriter.cs:45-56`
-- **Output:** `DataLakeServiceClient` removed in favour of the already-registered `BlobServiceClient`;
-  the exact-equality connection-string test at `Program.cs:107-109` replaced by a robust check;
-  OneLake-flavoured names (`ONELAKE_ENDPOINT`, `OneLakeBronzeWriter`) made storage-neutral
-- **Accept:** no reference to `Azure.Storage.Files.DataLake` remains; `dotnet test` passes; the service
-  reads a blob-form `storage_path` end to end.
-
 
 ### R3.7 Assert the event type and validate inbound *(ADR 0002, 0004)*
 - **Input:** `ProcessDatasetFunction.cs:36-38,190-203`, `contracts/dataset-available.v1.json`

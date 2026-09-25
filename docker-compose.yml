@@ -10,6 +10,16 @@
 #   servicebus-emulator  Azure Service Bus emulator  (AMQP :5672)
 #   ingestion-func       Python 3.11 Azure Functions  (:7071 → container :80)
 #   processing-func      .NET 10 Azure Functions      (:7072 → container :80)
+#
+# Functions host healthchecks authenticate to /admin/host/status with a fixed,
+# dev-only master key (infrastructure/functions-secrets/host.json, gitignored —
+# never commit it, never reuse it outside this local stack). Both function base
+# images (mcr.microsoft.com/azure-functions/python and .../dotnet-isolated) run
+# the same host binaries out of /azure-functions-host, so file-based secret
+# storage lives at the same path in both: /azure-functions-host/Secrets/host.json,
+# activated by AzureWebJobsSecretStorageType=files.
+
+x-functions-master-key: &functions-master-key "LOCAL-DEV-ONLY-MASTER-KEY-DO-NOT-USE-IN-PROD"
 
 services:
 
@@ -85,6 +95,12 @@ services:
       TableStorageConnection__tableServiceUri: "http://azurite:10002/devstoreaccount1"
       # Service Bus — emulator connection string (replaces __fullyQualifiedNamespace for dev)
       ServiceBusConnection: "${SERVICEBUS_CONNECTION}"
+      # File-based secret storage — see header comment. Mounted below at
+      # /azure-functions-host/Secrets/host.json.
+      AzureWebJobsSecretStorageType: files
+      FUNCTIONS_MASTER_KEY: *functions-master-key
+    volumes:
+      - ./infrastructure/functions-secrets/host.json:/azure-functions-host/Secrets/host.json:ro
     ports:
       # Container listens on :80 (the base image's default), not :7071 — the
       # previous "7071:7071" mapping pointed at a port nothing was bound to.
@@ -95,17 +111,13 @@ services:
       servicebus-emulator:
         condition: service_started
     healthcheck:
-      # /admin/host/status requires the function master key and always 401s without
-      # one (Azure Functions admin routes are auth-required by design, even from
-      # loopback, in a containerized host). We don't have that key here, so instead
-      # of the previous /admin/host/ping (which returns 200 as soon as the ASP.NET
-      # pipeline is up — proven to still say 200 while AzureWebJobsStorage was
-      # failing with AuthorizationFailure underneath), require /admin/host/status
-      # to answer at all: only reachable once the WebJobs Script host has finished
-      # initializing (loading functions) and registered its admin auth pipeline.
-      # 200 = authenticated somehow; 401 = host up, key just not supplied here.
-      # Anything else (connection refused, 5xx, timeout) fails the check.
-      test: ["CMD-SHELL", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:80/admin/host/status); test \"$$code\" = \"200\" -o \"$$code\" = \"401\""]
+      # Authenticated /admin/host/status: only 200s once the WebJobs Script host
+      # has finished initializing *and* every extension (storage, Service Bus)
+      # reports healthy — an invalid AzureWebJobsStorage key or an invalid
+      # FUNCTIONS_WORKER_RUNTIME both keep it out of "Running". FUNCTIONS_MASTER_KEY
+      # is a plain env var we set above purely so this shell command can read it —
+      # the Functions host itself only reads the key from the mounted host.json.
+      test: ["CMD-SHELL", "curl -s -H \"x-functions-key: $$FUNCTIONS_MASTER_KEY\" http://localhost:80/admin/host/status | grep -q '\"state\":\"Running\"'"]
       interval: 30s
       timeout: 5s
       start_period: 30s
@@ -129,6 +141,12 @@ services:
       SCHEMA_REGISTRY_BLOB_CONNECTION: "${AZURE_STORAGE_CONNECTION}"
       # Service Bus — emulator connection string
       ServiceBusConnection: "${SERVICEBUS_CONNECTION}"
+      # File-based secret storage — see header comment. Mounted below at
+      # /azure-functions-host/Secrets/host.json.
+      AzureWebJobsSecretStorageType: files
+      FUNCTIONS_MASTER_KEY: *functions-master-key
+    volumes:
+      - ./infrastructure/functions-secrets/host.json:/azure-functions-host/Secrets/host.json:ro
     ports:
       - "7072:80"
     depends_on:
@@ -137,11 +155,9 @@ services:
       servicebus-emulator:
         condition: service_started
     healthcheck:
-      # See ingestion-func's healthcheck comment: /admin/host/ping alone is not a
-      # reliable "functions loaded" signal (confirmed — it stayed 200 while this
-      # host's own /admin/host/status reported "azure.functions.webjobs.storage":
-      # "Unhealthy" underneath). Require /admin/host/status to answer 200 or 401.
-      test: ["CMD-SHELL", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost/admin/host/status); test \"$$code\" = \"200\" -o \"$$code\" = \"401\""]
+      # See ingestion-func's healthcheck comment: authenticated /admin/host/status,
+      # requiring the top-level "state":"Running" (not just a reachable endpoint).
+      test: ["CMD-SHELL", "curl -s -H \"x-functions-key: $$FUNCTIONS_MASTER_KEY\" http://localhost/admin/host/status | grep -q '\"state\":\"Running\"'"]
       interval: 30s
       timeout: 5s
       start_period: 45s
