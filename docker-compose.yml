@@ -25,7 +25,9 @@ services:
     volumes:
       - azurite_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 10000 || exit 1"]
+      # 127.0.0.1, not "localhost" — this image's /etc/hosts resolves localhost to
+      # ::1 first, and Azurite binds 0.0.0.0 (IPv4-only), so "localhost" always fails.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10000 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -61,17 +63,16 @@ services:
     depends_on:
       sql-edge:
         condition: service_healthy
+    # No healthcheck: this image ships no shell and no coreutils (confirmed — `docker exec`
+    # of sh/ls/dotnet all fail with "executable file not found in $PATH"), so no CMD-SHELL
+    # or exec-form check can run inside it. Dependents key off service_started instead.
     healthcheck:
-      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/localhost/5672' && echo OK || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      test: ["NONE"]
 
   # ── Ingestion Function (Python 3.11) ────────────────────────────────────────
   ingestion-func:
     build:
-      context: ./ingestion_func
+      context: ./services/ingestion-func
       dockerfile: Dockerfile
       target: runtime
     container_name: ingestion-func
@@ -90,7 +91,7 @@ services:
       azurite:
         condition: service_healthy
       servicebus-emulator:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7071/admin/host/status"]
       interval: 30s
@@ -101,7 +102,7 @@ services:
   # ── Processing Function (.NET 10) ───────────────────────────────────────────
   processing-func:
     build:
-      context: ./processing_func
+      context: ./services/processing-func
       dockerfile: Dockerfile
       target: runtime
     container_name: processing-func
@@ -122,7 +123,7 @@ services:
       azurite:
         condition: service_healthy
       servicebus-emulator:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/admin/host/ping"]
       interval: 30s
