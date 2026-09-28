@@ -1,6 +1,8 @@
 [submodule "services/ingestion-func"]
 	path = services/ingestion-func
 	url = https://github.com/jorgevr/ingestion_func.git
+	branch = main
 [submodule "services/processing-func"]
 	path = services/processing-func
 	url = https://github.com/jorgevr/processing_func.git
+	branch = main
