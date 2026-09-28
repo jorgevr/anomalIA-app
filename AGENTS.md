@@ -54,3 +54,22 @@ Not duplicated here — see each service's own `CLAUDE.md`:
 - Never commit `.env`, `local.settings.json`, or Azurite runtime data
   (`azurite-data/`, `__azurite_db_*`, `AzuriteConfig`, `.azurite/`).
 - Run read-only git commands with `--no-optional-locks`.
+
+## 6. Definition of done (every task, every repo)
+
+Learned from real failures in this repo; a task is not done until all that apply hold:
+
+- **Configuration changes** need one test with *only* the local settings set
+  (connection strings, no cloud keys) and one with *only* the cloud settings set
+  (account URL / namespace, no connection strings), for every config loader touched.
+- **Configuration is validated at host startup**, not lazily on first invocation — a bad
+  setting must make the container unhealthy, not fail the first run hours later.
+- **Runtime behaviour is proven on the compose stack from a clean state**
+  (`docker compose down -v` then `up -d --build`), with all services healthy. Mocked
+  "integration" tests do not count as proof.
+- **Anything read at runtime is inside the image.** Code never loads files from `specs/`,
+  `docs/` or other paths the Dockerfile does not copy.
+- **Deterministic failures are not retried.** Missing files, invalid config, unknown event
+  types or schema violations dead-letter or quarantine on the first attempt; only transient
+  errors (network, throttling, 5xx) go back to Service Bus for redelivery.
+- **Verification runs use one site / one file**, not the full historical backlog.

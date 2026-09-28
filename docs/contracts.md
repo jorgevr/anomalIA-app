@@ -151,7 +151,52 @@ creation. No data-lake account exists in IaC today; see task R4.1.
 
 ---
 
-## 5. Schemas
+## 5. Shared configuration
+
+Environment variable names both services must agree on for the storage clients built under ADR 0005.
+Each service loads its own copy from `.env` (root `docker-compose.yml`) or `local.settings.json`
+(`ingestion-func/local.settings.json.template:28-30`, `processing-func/src/DatasetProcessingFunction/local.settings.json.template:7-10`) — this table is the registry of the *names*, not a shared config file.
+
+### 5.1 Data storage (ADR 0005 — Blob API everywhere)
+
+| Variable | Selects | Cite |
+| :--- | :--- | :--- |
+| `DATA_STORAGE_CONNECTION` | Local/emulator: full Azurite blob connection string → `BlobServiceClient.from_connection_string` / `new BlobServiceClient(connStr)`. **Wins if set**, even when `DATA_STORAGE_ACCOUNT_URL` is also present. | `services/ingestion-func/src/config.py:100-105,208-213,242`; `services/processing-func/src/DatasetProcessingFunction/Program.cs:99-101` |
+| `DATA_STORAGE_ACCOUNT_URL` | Cloud: account URL + `DefaultAzureCredential`. Read only when `DATA_STORAGE_CONNECTION` is unset. | same cites, `Program.cs:102-104` |
+
+**At least one of the two must be set, or the service fails at startup** — `ingestion-func` raises
+`ConfigurationError` from `load_historical_config()` (`config.py:103-105,208-213` — the historical
+worker is the only ingestion path that touches bronze storage); `processing-func` throws
+`InvalidOperationException` from the `DataStorage` keyed client factory (`Program.cs:105-106`).
+
+| Container variable | Current value | Target layer (§3) | Read today |
+| :--- | :--- | :--- | :--- |
+| `BRONZE_CONTAINER` | `bronze` | source copy | **required** in `ingestion-func` (`config.py:186,243` — `ConfigurationError` if unset); **optional** in `processing-func`, defaults to `"bronze"` (`Program.cs:167`) |
+| `SILVER_CONTAINER` | *(not read anywhere — §3 target still writes validated output to `bronze`)* | validated Parquet | **no** — introduce with the ADR 0001 layer-rename task |
+| `QUARANTINE_CONTAINER` | *(not read anywhere)* | rejected rows + `reason.json` | **no** — introduce with the ADR 0001 quarantine task |
+
+### 5.2 Schema registry (`processing-func` only) — a separate storage account
+
+`SCHEMA_REGISTRY_*` is **not** an alias of `DATA_STORAGE_*`: `processing-func` builds a second,
+independent `BlobServiceClient` for it (`Program.cs:112-121`; keying rationale at
+`DataStorageKeys.cs:6`), so the schema registry can live in a different storage account from the
+data account. `ingestion-func` has no schema registry client and does not read these.
+
+| Variable | Selects | Cite |
+| :--- | :--- | :--- |
+| `SCHEMA_REGISTRY_BLOB_CONNECTION` | Local/emulator connection string. Wins if set. | `Program.cs:115-117` |
+| `SCHEMA_REGISTRY_ACCOUNT` | Cloud: `https://{account}.blob.core.windows.net` + `DefaultAzureCredential`. Read only when `SCHEMA_REGISTRY_BLOB_CONNECTION` is unset. | `Program.cs:118-120` |
+| `SCHEMA_REGISTRY_CONTAINER` | Container name. Optional, defaults to `"schema-registry"`. | `Program.cs:174` |
+
+Unlike the data-storage pair, `processing-func` does **not** fail at startup if both
+`SCHEMA_REGISTRY_BLOB_CONNECTION` and `SCHEMA_REGISTRY_ACCOUNT` are unset — it builds a
+`BlobServiceClient` against an account URL with an empty account name, which only fails at first
+read (`Program.cs:118-121`). This is drift from the data-storage pair's fail-fast behaviour, not a
+documented design choice.
+
+---
+
+## 6. Schemas
 
 | Schema | Kind | Owner | Read by | Enforced | Target location |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -172,7 +217,7 @@ creation. No data-lake account exists in IaC today; see task R4.1.
 > The cross-service contract `dataset-event.json` is validated by no code and no test, and is already
 > violated by the emitted `data.version` field. ADR 0004 makes it enforced.
 
-### 5.1 The registry (`contracts/`) — written, not yet vendored
+### 6.1 The registry (`contracts/`) — written, not yet vendored
 
 Established by task R1 and authoritative per ADR 0004. It describes the **target**; the differences each
 service must close are itemised under its own R2/R3 task in `docs/contract-migration.md`.

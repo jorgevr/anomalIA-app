@@ -64,6 +64,26 @@ verification of everything else.
 - **Note:** owned by each submodule's agent, not the root — the Contract Owner raises it, the service
   agent performs it.
 
+### R0.9 Bootstrap storage containers and the schema registry
+- **Input:** confirmed by direct inspection of a clean `down -v && up -d --build`: Azurite holds only
+  `azure-webjobs-hosts` (created by the Functions host) and whatever a service lazily creates
+  (`bronze`, from `BronzeWriter`/`adls_store.py`'s own container-create-if-missing). Nothing in the
+  compose stack creates `schema-registry`, `silver` or `quarantine`, and nothing uploads a vendor
+  mapping. `BlobSchemaRegistry.GetAsync` requests blob `{vendorId}-{schemaVersion}.json` —
+  `PVDAQ-v1.json` for this vendor — from container `SCHEMA_REGISTRY_CONTAINER`
+  (`BlobSchemaRegistry.cs:46`), and throws `UnknownSchemaException` on a 404
+  (`BlobSchemaRegistry.cs:59-63`). Result: `processing-func` dead-letters every event.
+- **Output:** a one-shot `storage-init` service in `docker-compose.yml` (Azure CLI image against
+  Azurite) that creates `bronze`, `silver`, `quarantine` and `schema-registry`, then uploads
+  `services/processing-func/schemas/PVDAQ-v1.json` (mounted read-only) into `schema-registry` as blob
+  `PVDAQ-v1.json`. It does **not** seed sample CSVs into `bronze` — that stays
+  `scripts/seed-azurite.js`'s job, run manually, never part of `docker compose up`. Both functions'
+  `depends_on` gains `storage-init: condition: service_completed_successfully`.
+- **Accept:** `docker compose down -v && docker compose up -d --build`, with no manual step
+  afterward, leaves `schema-registry` holding exactly one blob, `PVDAQ-v1.json`, and `bronze`,
+  `silver`, `quarantine` all existing and empty. A subsequently triggered ingestion run no longer
+  dead-letters on `processing-func` with `UnknownSchemaException`.
+
 ---
 
 ## R1 — Workspace root: establish `contracts/` *(ADR 0004)*
@@ -160,7 +180,13 @@ Owning repo: **services/ingestion-func**. Gates: `ruff check .` and `pytest` (`d
 - **Accept:** a contract test asserts every emitted envelope validates against
   `schemas/contracts/dataset-available.v1.json`, and an envelope with an unknown extra field fails
   that test. The extra field must be an **envelope** attribute: `data` is open by construction, so an
-  extra field there is a legal minor version and will *not* fail (see below).
+  extra field there is a legal minor version and will *not* fail (see below). Additionally: the
+  envelope's `correlation_id` equals the historical work item's `correlation_id` — the same value the
+  dispatcher and worker already log (`function_app.py:320,432`) — and it stays identical across
+  Service Bus redelivery of the same work item, i.e. it is not regenerated per delivery attempt.
+  `data.ingestion_id` remains a distinct field (a per-attempt identifier) and is never conflated with
+  `correlation_id`. A test asserts both: the emitted envelope and the originating work item carry the
+  same `correlation_id`, and `data.ingestion_id` differs from it.
 - **Vendoring:** add `"ingestion-func": ["dataset-available.v1.json", "metadata-file.v1.json"]` to
   `contracts/vendoring.json` and copy both files byte-for-byte into
   `services/ingestion-func/schemas/contracts/`. Until that entry exists the workspace drift check has
@@ -392,7 +418,11 @@ Owning repo: **services/processing-func**. Gates: `dotnet format --verify-no-cha
 - **Output:** `traceparent` read from `ApplicationProperties`, falling back to the envelope;
   `ActivityContext.Parse` used to parent (or link) `dataset.process`
 - **Accept:** a test asserts the `dataset.process` activity's `TraceId` equals the `trace-id` of the
-  inbound `traceparent`. This fails today.
+  inbound `traceparent`. This fails today. Additionally: every log line `ProcessDatasetFunction` and
+  `ProcessDatasetCommandHandler` emit while handling one message carries that message's
+  `correlation_id` — not a per-log-call generated id — and the outbound `dataset-validated` event
+  (R3.9) carries the same `correlation_id` the inbound message did. A test that scrapes one message's
+  full processing log and its outbound event asserts both.
 
 ### R3.9 Publish the renamed outbound event as a CloudEvent *(ADR 0001, 0002)*
 - **Input:** `DatasetBronzeAvailablePublisher.cs:33`, `ServiceBusEventPublisher.cs:29-39`
@@ -506,3 +536,25 @@ ADR 0006 (per-device schema mapping) is **deferred by design**. The obligations 
 are already carried by tasks R2.3 (`mapping_version` populated), R3.2 and R3.4 (open reason-code
 vocabulary, row-level quarantine retaining source identity) and R3.8 (trace linked onto quarantined
 records). No task here implements fingerprint resolution.
+
+---
+
+## Root follow-ups
+
+Raised by the Contract Owner, not yet sequenced into R0–R4 or owned by a task — recorded here so they
+aren't lost.
+
+### Replay tool for events dead-lettered by processing
+`ingestion-func`'s `historical_worker` calls `tracker.mark_completed(...)` (`function_app.py:615`)
+once it has written the bronze CSV and `metadata.json`, independent of what `processing-func` does
+with the `raw-energy-events` message that follows. If that message is later dead-lettered
+(`UnknownSchemaException`, an invalid envelope, or any other broker-DLQ reason under ADR 0001
+§Failure routing), the source file is already marked `completed` in `FileTrackingStore` — nothing
+re-drives it, and no code path re-emits the event. The bronze file is stranded: reachable by nothing
+except deleting its file-tracking row and re-running ingestion from OEDI S3.
+
+**Needed:** a small tool that takes an existing `bronze` source file (or its `metadata.json`),
+rebuilds and re-emits the `solar.pvdaq.dataset.available.v1` event for it onto `raw-energy-events`,
+without re-fetching from S3 or rewriting bronze. Not yet scoped or assigned an owning repo — it reads
+both services' storage and queue conventions but would modify neither service's code, so it likely
+lands as a root `scripts/` entry rather than inside either submodule.

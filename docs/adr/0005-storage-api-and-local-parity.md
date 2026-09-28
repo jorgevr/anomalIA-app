@@ -109,6 +109,10 @@ behaviour (`OneLakeBronzeWriter.cs:45-56`).
   start as written today. Tracked as task R4 in `docs/contract-migration.md`.
 - ACLs and atomic rename exist on the account but are **deliberately unused by code**. Adopting either
   later is a code change within this decision, not a reversal of it — the account already supports them.
+- The config keys for the dual-mode connection-string/account-url switch this decision requires
+  (`DATA_STORAGE_CONNECTION`, `DATA_STORAGE_ACCOUNT_URL`, `BRONZE_CONTAINER`, and the separately
+  configured `SCHEMA_REGISTRY_*` pair) are registered in `docs/contracts.md` §5 "Shared configuration",
+  which both services now implement.
 
 **Forward compatibility (ADR 0006)**
 - Fingerprint resolution and quarantine writes are storage-API-agnostic plain object puts, and need no

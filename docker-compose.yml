@@ -79,6 +79,39 @@ services:
     healthcheck:
       test: ["NONE"]
 
+  # ── Storage bootstrap (R0.9) ──────────────────────────────────────────────────
+  # One-shot init: creates the containers neither service creates for itself, and uploads the
+  # PVDAQ vendor mapping into schema-registry. Without this, processing-func dead-letters every
+  # event with UnknownSchemaException (BlobSchemaRegistry.cs:59-63) — confirmed on a clean
+  # `down -v && up -d --build`, the schema-registry container never gets created and the blob
+  # BlobSchemaRegistry.cs:46 requests (`{vendorId}-{schemaVersion}.json`, e.g. "PVDAQ-v1.json")
+  # never gets uploaded. Deliberately does NOT seed sample CSVs into bronze — that stays
+  # scripts/seed-azurite.js's job, run manually, not part of `docker compose up`.
+  storage-init:
+    image: mcr.microsoft.com/azure-cli:2.65.0
+    container_name: storage-init
+    depends_on:
+      azurite:
+        condition: service_healthy
+    volumes:
+      - ./services/processing-func/schemas/PVDAQ-v1.json:/schemas/PVDAQ-v1.json:ro
+    environment:
+      AZURE_STORAGE_CONNECTION_STRING: "${AZURE_STORAGE_CONNECTION}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        for c in bronze silver quarantine schema-registry; do
+          az storage container create --name "$$c" --only-show-errors >/dev/null
+        done
+        az storage blob upload \
+          --container-name schema-registry \
+          --file /schemas/PVDAQ-v1.json \
+          --name PVDAQ-v1.json \
+          --overwrite \
+          --only-show-errors >/dev/null
+        echo "storage-init: bronze/silver/quarantine/schema-registry ready, PVDAQ-v1.json uploaded"
+
   # ── Ingestion Function (Python 3.11) ────────────────────────────────────────
   ingestion-func:
     build:
@@ -93,6 +126,14 @@ services:
       # Storage — point to Azurite service (UseDevelopmentStorage=true only resolves 127.0.0.1)
       AzureWebJobsStorage: "${AZURE_STORAGE_CONNECTION}"
       TableStorageConnection__tableServiceUri: "http://azurite:10002/devstoreaccount1"
+      # Data account — bronze reads/writes (ADR 0005, docs/contracts.md "Shared configuration").
+      # Same DATA_STORAGE_* values as processing-func below; both point at Azurite locally.
+      DATA_STORAGE_CONNECTION: "${DATA_STORAGE_CONNECTION}"
+      BRONZE_CONTAINER: "${BRONZE_CONTAINER}"
+      # Verification override (AGENTS.md §6 "Definition of done" — one site, not the full
+      # backlog): falls through to .env's own value when not overridden, so plain `docker compose
+      # up` is unaffected; `PVDAQ_HISTORICAL_SITE_IDS=9068 docker compose up` limits to one site.
+      PVDAQ_HISTORICAL_SITE_IDS: "${PVDAQ_HISTORICAL_SITE_IDS}"
       # Service Bus — emulator connection string (replaces __fullyQualifiedNamespace for dev)
       ServiceBusConnection: "${SERVICEBUS_CONNECTION}"
       # File-based secret storage — see header comment. Mounted below at
@@ -110,6 +151,8 @@ services:
         condition: service_healthy
       servicebus-emulator:
         condition: service_started
+      storage-init:
+        condition: service_completed_successfully
     healthcheck:
       # Authenticated /admin/host/status: only 200s once the WebJobs Script host
       # has finished initializing *and* every extension (storage, Service Bus)
@@ -136,10 +179,10 @@ services:
       FUNCTIONS_WORKER_RUNTIME: dotnet-isolated
       # Storage — Azurite. DATA_STORAGE_CONNECTION and SCHEMA_REGISTRY_BLOB_CONNECTION are two
       # separate storage accounts in the target design (docs/contracts.md "Shared configuration"),
-      # both pointed at the same emulator locally.
+      # both pointed at the same emulator locally. Same DATA_STORAGE_* values as ingestion-func above.
       AzureWebJobsStorage: "${AZURE_STORAGE_CONNECTION}"
-      DATA_STORAGE_CONNECTION: "${AZURE_STORAGE_CONNECTION}"
-      BRONZE_CONTAINER: "bronze"
+      DATA_STORAGE_CONNECTION: "${DATA_STORAGE_CONNECTION}"
+      BRONZE_CONTAINER: "${BRONZE_CONTAINER}"
       SCHEMA_REGISTRY_BLOB_CONNECTION: "${AZURE_STORAGE_CONNECTION}"
       # Service Bus — emulator connection string
       ServiceBusConnection: "${SERVICEBUS_CONNECTION}"
@@ -156,6 +199,8 @@ services:
         condition: service_healthy
       servicebus-emulator:
         condition: service_started
+      storage-init:
+        condition: service_completed_successfully
     healthcheck:
       # See ingestion-func's healthcheck comment: authenticated /admin/host/status,
       # requiring the top-level "state":"Running" (not just a reachable endpoint).
