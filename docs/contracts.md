@@ -44,7 +44,8 @@ Namespace tier is **Basic — queues only, no topics or subscriptions** (`ingest
 - **Consumer:** `processing-func`, `ProcessDatasetFunction.cs:36-38`
 - **Queue:** `raw-energy-events` · **Encoding:** `application/cloudevents+json`
 - **Contract:** `specs/002-pvdaq-historical-ingestion/contracts/dataset-event.json`
-  → target `contracts/dataset-available.v1.json` (ADR 0004)
+  → target `contracts/dataset-available.v1.json` (ADR 0004) — **now written**; the differences the
+  producer and consumer must close are itemised under tasks R2.1, R2.3, R2.4, R3.6 and R3.7
 
 | Envelope field | Type | Produced | Consumed | Note |
 | :--- | :--- | :--- | :--- | :--- |
@@ -52,6 +53,7 @@ Namespace tier is **Basic — queues only, no topics or subscriptions** (`ingest
 | `type` | string | yes | **no** | never asserted by the consumer — ADR 0002 requires it |
 | `source` | string | yes | no | `/energy-ingestion-boundary/pvdaq` |
 | `id`, `time`, `datacontenttype` | string | yes | no | |
+| `dataschema` | string | **no** | no | absent today; required in the target, `const` the contract's `$id` (ADR 0002 rule 2) |
 | `tenant_id` | string | yes | no | non-standard extension |
 | `source_vendor` | string | yes | **yes** | `"PVDAQ"`; registry lookup key |
 | `schema_version` | string | yes | **yes** | registry lookup key |
@@ -63,7 +65,7 @@ Namespace tier is **Basic — queues only, no topics or subscriptions** (`ingest
 | `data.category` | string | yes | **yes** | |
 | `data.storage_path` | string | yes | **yes** | container parsed from the URI at runtime |
 | `data.file_format` | `"csv"` | yes | no | |
-| `data.version` | int | yes | no | violates `additionalProperties: false` (`dataset-event.json:119`) |
+| `data.version` | int | yes | no | violated `additionalProperties: false` (`dataset-event.json:119`); **declared and required** by the target contract |
 | `data.ingestion_id` | uuid | yes | no | |
 | `data.source_url` | string | yes | no | |
 | `data.file_size` | int | yes | no | |
@@ -80,6 +82,11 @@ The consumer models **6 of 22 fields** (`ProcessDatasetFunction.cs:190-203`) and
 - **Payload:** `dataset_id`, `record_count`, `bronze_path` (→ `silver_path`, ADR 0001),
   `schema_version`, `correlation_id`, `published_at`
 - Sets `CorrelationId` and `MessageId` on the broker message — which the producer in §2.1 does not.
+- **Contract:** none today → target `contracts/dataset-validated.v1.json` (ADR 0004). In the target,
+  `dataset_id`, `record_count` and `silver_path` sit in `data`; `schema_version` and a new
+  `source_vendor` become envelope attributes; `published_at` is dropped in favour of the CloudEvents
+  `time`; `traceparent` becomes required; and `record_count` may be 0, because row-level quarantine
+  admits a file whose every row is rejected. Differences itemised under task R3.9.
 
 ### 2.3 Retired types
 
@@ -93,7 +100,7 @@ The consumer models **6 of 22 fields** (`ProcessDatasetFunction.cs:190-203`) and
 | Message | Fields | Cite |
 | :--- | :--- | :--- |
 | historical work item | `site_id`, `s3_key`, `file_name`, `category`, `correlation_id`, `enqueued_at`, `last_modified` | `function_app.py:385-393` |
-| record dead letter — **retired**, becomes a quarantine `reason.json` (ADR 0001) | `original_payload`, `error_type`, `error_details[]`, `correlation_id`, `site_id`, `timestamp`, `source_vendor`, `schema_version` | `src/service_bus_emitter.py:38-47` |
+| record dead letter — **retired**, becomes a quarantine `reason.json` per `contracts/quarantine-record.v1.json` (ADR 0001) | `original_payload`, `error_type`, `error_details[]`, `correlation_id`, `site_id`, `timestamp`, `source_vendor`, `schema_version` | `src/service_bus_emitter.py:38-47` |
 | worker dead letter | `file_reference`, `failure_reason`, `error_type`, `correlation_id` | `function_app.py:446-452` |
 
 The work item carries **no `traceparent`**, breaking the internal dispatcher → worker trace (ADR 0003).
@@ -151,12 +158,45 @@ creation. No data-lake account exists in IaC today; see task R4.1.
 | `pvdaq-v1.json` | JSON Schema, per record | `ingestion-func` | `src/schema_validator.py:14-16` | write time, per record (`src/record_pipeline.py:64`) | stays in service |
 | `PVDAQ-v1.json` | **vendor field mapping**, not a schema | `processing-func` | `BlobSchemaRegistry.cs:46-54` | read time | schema-registry container (ADR 0004) |
 | `dataset-event.json` | JSON Schema, cross-service | Contract Owner | **nobody** | **never** | `contracts/dataset-available.v1.json` |
-| `work-item-message.json` | JSON Schema | `ingestion-func` | `function_app.py:73-78` | inbound (`:440`) | `contracts/work-item.v1.json` |
-| `cloudevents-envelope.json`, `dead-letter-message.json` | JSON Schema | `ingestion-func` | tests only | tests only | `contracts/` |
-| `metadata-file.json`, `file-tracking-entity.json` | JSON Schema | `ingestion-func` | **nobody** | **never** | `contracts/metadata-file.v1.json` |
+| `work-item-message.json` | JSON Schema | `ingestion-func` | `function_app.py:73-78` | inbound (`:440`) | **stays in service** — `services/ingestion-func/schemas/`; internal, never crosses a boundary |
+| `cloudevents-envelope.json` | JSON Schema | `ingestion-func` | tests only | tests only | superseded — each registry contract carries its own envelope, so a standalone envelope schema has no consumer |
+| `dead-letter-message.json` | JSON Schema | `ingestion-func` | tests only | tests only | `contracts/quarantine-record.v1.json` — the destination changes from a queue to a blob (ADR 0001) |
+| `dataset-bronze-available-event.json` | JSON Schema, draft-07 | `processing-func` | **nobody** | **never** | `contracts/dataset-validated.v1.json` |
+| `dead-letter-reason.json` | JSON Schema, draft-07 | `processing-func` | **nobody** | **never** | `contracts/quarantine-record.v1.json` |
+| `metadata-file.json` | JSON Schema | `ingestion-func` | **nobody** | **never** | `contracts/metadata-file.v1.json` |
+| `file-tracking-entity.json` | JSON Schema | `ingestion-func` | **nobody** | **never** | **stays in service** — a table-storage row, not a cross-service artifact |
 
 > `pvdaq-v1.json` (a JSON Schema in `ingestion-func`) and `PVDAQ-v1.json` (a field-mapping config in
 > `processing-func`) differ only by case and are **unrelated artifacts**. ADR 0004 separates them.
 
 > The cross-service contract `dataset-event.json` is validated by no code and no test, and is already
 > violated by the emitted `data.version` field. ADR 0004 makes it enforced.
+
+### 5.1 The registry (`contracts/`) — written, not yet vendored
+
+Established by task R1 and authoritative per ADR 0004. It describes the **target**; the differences each
+service must close are itemised under its own R2/R3 task in `docs/contract-migration.md`.
+
+| File | Kind | Producer | Consumer | Supersedes |
+| :--- | :--- | :--- | :--- | :--- |
+| `dataset-available.v1.json` | message — CloudEvent on `raw-energy-events` | `ingestion-func` | `processing-func` | `dataset-event.json`, `dataset-available-event.json` |
+| `dataset-validated.v1.json` | message — CloudEvent on `dataset-validated` | `processing-func` | downstream (none) | `dataset-bronze-available-event.json` |
+| `quarantine-record.v1.json` | at rest — `reason.json` in `quarantine` | both services | operators, re-drive tooling | `dead-letter-message.json`, `dead-letter-reason.json` |
+| `metadata-file.v1.json` | at rest — `metadata.json` in `bronze` | `ingestion-func` | silver layer, operators | `metadata-file.json` |
+
+Also in the folder: `examples/<contract>/{valid,invalid}-*.json`, the `vendoring.json` manifest
+(`{service: [contract files]}` — **empty**; R2.3 and R3.7 populate it) and `README.md`. Enforced by
+`scripts/check-contracts.py` via `.github/workflows/contracts.yml`, in this repo only (ADR 0004 rule 4).
+
+Two shape rules apply to both message contracts and are load-bearing rather than stylistic:
+
+- **The envelope is closed; `data` is open.** An unknown envelope attribute is a producer defect and
+  fails. An added `data` field is a minor version (ADR 0002 rule 2) and must validate, or a consumer
+  holding an older vendored copy would need a redeploy for every additive change — including ADR 0006's
+  `device_id`.
+- **Every `format` is backed by an equivalent `pattern`,** so a vendored copy validates identically
+  across Python and .NET validators and regardless of which optional format packages are installed.
+
+> There is **no** `dead-letter.v1.json` and **no** `work-item.v1.json` in the registry, contrary to the
+> draft list in ADR 0004. A broker dead-letter reason is a broker property, not a shared schema, and the
+> work item is one service's private message. See ADR 0004 §Decision and task R1.1.

@@ -1,0 +1,8 @@
+{
+  "dataset_id": "9068_ac_power",
+  "record_count": 8637,
+  "bronze_path": "http://127.0.0.1:10000/devstoreaccount1/bronze/9068_ac_power/2026-09-24/data.parquet",
+  "schema_version": "v1",
+  "correlation_id": "b1d4e8f0-6a22-4c17-9e83-5d0c7f31ab99",
+  "published_at": "2026-09-24T06:13:07.4412088Z"
+}

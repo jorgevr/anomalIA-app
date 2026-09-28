@@ -1,0 +1,18 @@
+{
+  "specversion": "1.0",
+  "type": "dataset.bronze.available",
+  "source": "/dataset-processing/pvdaq",
+  "id": "a0c31d92-7e45-4b18-8f2a-6d19c3b7e058",
+  "time": "2026-09-24T06:13:07.4412088Z",
+  "datacontenttype": "application/json",
+  "dataschema": "https://github.com/jorgevr/anomalIA-app/contracts/dataset-validated.v1.json",
+  "source_vendor": "PVDAQ",
+  "schema_version": "v1",
+  "correlation_id": "b1d4e8f0-6a22-4c17-9e83-5d0c7f31ab99",
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  "data": {
+    "dataset_id": "9068_ac_power",
+    "record_count": 8637,
+    "silver_path": "http://127.0.0.1:10000/devstoreaccount1/silver/9068_ac_power"
+  }
+}

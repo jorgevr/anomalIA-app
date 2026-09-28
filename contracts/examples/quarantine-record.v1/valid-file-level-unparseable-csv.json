@@ -1,0 +1,22 @@
+{
+  "reason_code": "UNPARSEABLE_CSV",
+  "scope": "file",
+  "quarantined_at": "2026-09-24T06:13:02.117904+00:00",
+  "quarantined_by": "processing-func",
+  "correlation_id": "b1d4e8f0-6a22-4c17-9e83-5d0c7f31ab99",
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  "schema_version": "v1",
+  "data_path": "http://127.0.0.1:10000/devstoreaccount1/quarantine/dataset=9068_ac_power/ingestion_date=2026-09-24/v1/9068_ac_power_v1.csv",
+  "source": {
+    "source_vendor": "PVDAQ",
+    "site_id": 9068,
+    "device_id": null,
+    "category": "ac_power",
+    "source_uri": "http://127.0.0.1:10000/devstoreaccount1/bronze/source=pvdaq/dataset=9068_ac_power/ingestion_date=2026-09-24/9068_ac_power_v1.csv",
+    "version": 1
+  },
+  "detail": {
+    "parser": "CsvHelper",
+    "message": "No header row could be resolved; 0 of 4193 lines yielded fields."
+  }
+}

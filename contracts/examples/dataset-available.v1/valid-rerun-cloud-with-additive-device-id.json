@@ -1,0 +1,28 @@
+{
+  "specversion": "1.0",
+  "type": "solar.pvdaq.dataset.available.v1",
+  "source": "/energy-ingestion-boundary/pvdaq",
+  "id": "7c9e1b40-2d35-4a6f-b8e1-04c7a2f95d63",
+  "time": "2026-09-25T03:01:09.220145+00:00",
+  "datacontenttype": "application/json",
+  "dataschema": "https://github.com/jorgevr/anomalIA-app/contracts/dataset-available.v1.json",
+  "tenant_id": "anomalia-dev",
+  "source_vendor": "PVDAQ",
+  "schema_version": "v1",
+  "mapping_version": "v2",
+  "correlation_id": "5e3b0a71-c4d8-4f29-9a06-7b81e2d3c5f4",
+  "ingestion_timestamp": "2026-09-25T03:01:09.220145+00:00",
+  "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+  "data": {
+    "site_id": 9068,
+    "category": "ac_power",
+    "file_format": "csv",
+    "storage_path": "https://anomaliadata.blob.core.windows.net/bronze/source=pvdaq/dataset=9068_ac_power/ingestion_date=2026-09-25/9068_ac_power_v3.csv",
+    "version": 3,
+    "ingestion_id": "5e3b0a71-c4d8-4f29-9a06-7b81e2d3c5f4",
+    "source_url": "https://oedi-data-lake.s3.amazonaws.com/pvdaq/2023-solar-data-prize/9068_OEDI/data/9068_ac_power_data.csv",
+    "file_size": 1153434,
+    "file_hash": "5ec7300926308cd9304077d9c5f9d7aae8330ff255fb047a124e4ff9b5ec1bf8",
+    "device_id": "9068-inv-02"
+  }
+}

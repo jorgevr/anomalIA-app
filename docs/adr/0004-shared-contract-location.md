@@ -51,14 +51,28 @@ with `docs/agent-fleet.md` §3.4 and `AGENTS.md` §3.
 
 ```
 contracts/
-  dataset-available.v1.json     # ingestion -> processing
-  dataset-validated.v1.json     # processing -> downstream
-  work-item.v1.json             # ingestion internal (dispatcher -> worker)
-  dead-letter.v1.json           # both
-  metadata-file.v1.json         # bronze sidecar
+  dataset-available.v1.json     # message:  ingestion -> processing
+  dataset-validated.v1.json     # message:  processing -> downstream
+  quarantine-record.v1.json     # at rest:  reason.json in quarantine, written by both
+  metadata-file.v1.json         # at rest:  metadata.json sidecar in bronze
+  examples/<contract>/          # valid-*.json and invalid-*.json, executable documentation
+  vendoring.json                # manifest: {service: [contract files]} the drift check reads
+  README.md                     # ownership, versioning rule, how to vendor
 ```
 
-Three rules follow:
+Two corrections to an earlier draft of this list, both decided by the Contract Owner:
+
+- **`dead-letter.v1.json` is replaced by `quarantine-record.v1.json`.** A dead-letter *message* body
+  is not a contract the target state has: ADR 0001 retires `pvdaq-dead-letter` and narrows the broker
+  DLQ to unprocessable messages, whose reason is a broker property rather than a shared schema. What
+  genuinely crosses a boundary is the **`reason.json` written into `quarantine`**, read by operators
+  and by re-drive tooling, so that is what the registry describes.
+- **`work-item.v1.json` is not in `contracts/`.** The dispatcher → worker work item never leaves
+  `ingestion-func`; it is internal to one repo, and a contract folder that holds one service's private
+  message shape invites exactly the coupling this ADR removes. It stays at
+  `services/ingestion-func/schemas/`, validated by that service alone.
+
+Four rules follow:
 
 1. **Separate message contracts from vendor mappings.** A *message contract* is a JSON Schema
    describing a cross-service message and lives in `contracts/`, owned by the Contract Owner. A

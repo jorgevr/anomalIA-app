@@ -58,6 +58,10 @@ Rules:
    changing a meaning) is a new major and therefore a new type string.
 2. **Minor changes are additive only** and keep the type string; the exact schema is identified by the
    CloudEvents `dataschema` attribute, a URI pointing at the contract in the registry (ADR 0004).
+   For a consumer holding an older vendored copy to survive a minor version — the property the forward
+   compatibility note below depends on — the contracts declare the `data` member **open** and the
+   envelope **closed**: an added payload field is a minor version and must validate, while an unknown
+   envelope attribute is a producer defect and must not.
 3. **Event names never reference a storage layer.** `dataset.validated` describes what happened to the
    data, not where it was put, so ADR 0001's renames cannot propagate into the event contract.
 4. **Every message is a CloudEvent**, including `processing-func`'s outbound, with content type

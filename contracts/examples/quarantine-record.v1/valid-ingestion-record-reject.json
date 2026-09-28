@@ -1,0 +1,31 @@
+{
+  "reason_code": "SCHEMA_VALIDATION_FAILED",
+  "scope": "row",
+  "quarantined_at": "2026-09-25T03:01:12.007733+00:00",
+  "quarantined_by": "ingestion-func",
+  "correlation_id": "5e3b0a71-c4d8-4f29-9a06-7b81e2d3c5f4",
+  "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+  "schema_version": "v1",
+  "record_count": 1,
+  "source": {
+    "source_vendor": "PVDAQ",
+    "site_id": 9068,
+    "device_id": "9068-inv-02",
+    "category": "ac_power",
+    "source_uri": "https://oedi-data-lake.s3.amazonaws.com/pvdaq/2023-solar-data-prize/9068_OEDI/data/9068_ac_power_data.csv",
+    "version": 3
+  },
+  "rows": [
+    {
+      "row_index": 0,
+      "reason_code": "TYPE_MISMATCH",
+      "field": "SiteID",
+      "rule": "type",
+      "detail": "Expected integer, got 'nine thousand sixty-eight'."
+    }
+  ],
+  "detail": {
+    "validator": "jsonschema",
+    "schema": "pvdaq-v1.json"
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jorgevr/anomalIA-app/contracts/dataset-validated.v1.json",
+  "title": "solar.pvdaq.dataset.validated.v1",
+  "description": "CloudEvents v1.0 envelope emitted by processing-func onto the queue dataset-validated once validated records have been written to the silver container. Replaces the flat-JSON dataset.bronze.available message. Target state per ADR 0001 (silver_path), ADR 0002 (CloudEvents envelope, versioned type, dataschema) and ADR 0003 (correlation_id + traceparent).",
+  "type": "object",
+  "required": [
+    "specversion",
+    "type",
+    "source",
+    "id",
+    "time",
+    "datacontenttype",
+    "dataschema",
+    "source_vendor",
+    "schema_version",
+    "correlation_id",
+    "traceparent",
+    "data"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "specversion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "CloudEvents spec version. Absent today: the outbound message is flat JSON (ADR 0002)."
+    },
+    "type": {
+      "type": "string",
+      "const": "solar.pvdaq.dataset.validated.v1",
+      "description": "Describes what happened to the data, not where it was put, so a layer rename cannot force an event rename (ADR 0002 rule 3)."
+    },
+    "source": {
+      "type": "string",
+      "const": "/dataset-processing/pvdaq",
+      "description": "Logical producer identity for processing-func."
+    },
+    "id": {
+      "$ref": "#/$defs/uuid",
+      "description": "Unique event identifier. Also set as the Service Bus MessageId."
+    },
+    "time": {
+      "$ref": "#/$defs/timestamp",
+      "description": "Emission timestamp. Supersedes the flat message's published_at, which carried the same meaning."
+    },
+    "datacontenttype": {
+      "type": "string",
+      "const": "application/json",
+      "description": "Content type of the data member. The Service Bus message itself carries application/cloudevents+json (ADR 0002 rule 4)."
+    },
+    "dataschema": {
+      "type": "string",
+      "const": "https://github.com/jorgevr/anomalIA-app/contracts/dataset-validated.v1.json",
+      "description": "ADR 0002 rule 2: pins the exact contract in the registry. Equals this schema's $id."
+    },
+    "source_vendor": {
+      "type": "string",
+      "const": "PVDAQ",
+      "description": "Propagated from the triggering dataset-available event."
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^v[0-9]+$",
+      "description": "Vendor record-schema version used for validation, propagated from the triggering event. Promoted from the flat payload to an envelope attribute so both events carry one envelope shape."
+    },
+    "correlation_id": {
+      "$ref": "#/$defs/uuid",
+      "description": "ADR 0003 business key, propagated unchanged from the triggering dataset-available event. Also set on the Service Bus message's CorrelationId property."
+    },
+    "traceparent": {
+      "$ref": "#/$defs/traceparent",
+      "description": "ADR 0003: W3C trace context of the processing span, carried in the Service Bus application properties and duplicated here as the durable record."
+    },
+    "data": {
+      "type": "object",
+      "description": "Validated-dataset payload. Open by construction (ADR 0002 rule 2): additive fields are a minor version and must not break a consumer validating against this copy.",
+      "required": [
+        "dataset_id",
+        "record_count",
+        "silver_path"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "dataset_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Logical dataset identifier {site_id}_{category}, matching the triggering event."
+        },
+        "record_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Canonical records written to silver. Zero is legal: row-level quarantine (ADR 0001, R3.4) admits a file whose every row is rejected, so this relaxes the superseded contract's minimum of 1."
+        },
+        "silver_path": {
+          "type": "string",
+          "pattern": "^https?://[^ ]+$",
+          "description": "Absolute blob-endpoint URI of the written Parquet partition (ADR 0001 renames bronze_path to silver_path; ADR 0005 fixes the blob form). A file spanning two data dates writes two partitions; this names the partition root for the dataset."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "Lowercase canonical UUID. The pattern is carried alongside the format so validation is deterministic wherever format assertion is disabled."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$",
+      "description": "RFC 3339 timestamp with an explicit offset."
+    },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+      "allOf": [
+        {
+          "not": {
+            "pattern": "^00-0{32}-"
+          },
+          "description": "W3C forbids an all-zero trace-id; it is also the signature of a synthesised context (ADR 0003)."
+        },
+        {
+          "not": {
+            "pattern": "-0{16}-[0-9a-f]{2}$"
+          },
+          "description": "W3C forbids an all-zero parent-id."
+        }
+      ]
+    }
+  }
+}

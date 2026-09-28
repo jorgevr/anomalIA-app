@@ -1,0 +1,18 @@
+{
+  "specversion": "1.0",
+  "type": "solar.pvdaq.dataset.validated.v1",
+  "source": "/dataset-processing/pvdaq",
+  "id": "c4f7b209-31ad-4e66-93b0-8a25d1e70fc3",
+  "time": "2026-09-25T03:02:55.1903774Z",
+  "datacontenttype": "application/json",
+  "dataschema": "https://github.com/jorgevr/anomalIA-app/contracts/dataset-validated.v1.json",
+  "source_vendor": "PVDAQ",
+  "schema_version": "v1",
+  "correlation_id": "5e3b0a71-c4d8-4f29-9a06-7b81e2d3c5f4",
+  "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+  "data": {
+    "dataset_id": "9068_ac_power",
+    "record_count": 0,
+    "silver_path": "https://anomaliadata.blob.core.windows.net/silver/9068_ac_power"
+  }
+}

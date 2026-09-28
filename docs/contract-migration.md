@@ -70,23 +70,57 @@ verification of everything else.
 
 Owning repo: **anomalia-platform (root)**.
 
+**Status: done.** The registry describes the **target** state from ADRs 0001–0005, not what the code
+does. Every difference is listed under its owning R2/R3 task below, under the heading *Contract
+differences (target wins)*. A service agent reconciles its code to the contract; it never edits the
+contract, and never hand-edits its vendored copy.
+
 ### R1.1 Create the authoritative contracts folder
 - **Input:** the current scattered copies under `services/*/specs/*/contracts/`
 - **Output:** `contracts/dataset-available.v1.json`, `contracts/dataset-validated.v1.json`,
-  `contracts/work-item.v1.json`, `contracts/dead-letter.v1.json`, `contracts/metadata-file.v1.json`
+  `contracts/quarantine-record.v1.json`, `contracts/metadata-file.v1.json`, plus
+  `contracts/examples/<contract>/{valid,invalid}-*.json`, `contracts/vendoring.json` (the
+  `{service: [contract files]}` manifest, empty until R2.3 and R3.7 populate it) and
+  `contracts/README.md`.
+  - `dead-letter.v1.json` from the ADR 0004 draft list is **replaced by** `quarantine-record.v1.json`:
+    ADR 0001 retires `pvdaq-dead-letter` and narrows the broker DLQ to unprocessable messages, so the
+    artifact that actually crosses a boundary is the `reason.json` written into `quarantine`.
+  - `work-item.v1.json` is **not** in `contracts/`: the dispatcher → worker item is
+    `ingestion-func`-internal and stays at `services/ingestion-func/schemas/`.
 - **Accept:** every file validates as a Draft 2020-12 JSON Schema, and
   `contracts/dataset-available.v1.json` admits the **full** field set in `docs/contracts.md` §2.1 —
   including `data.version`, which today violates `additionalProperties: false`
-  (`dataset-event.json:119`).
+  (`dataset-event.json:119`). Each contract carries at least 2 valid and 3 invalid examples, each
+  invalid one breaking a **different** rule; `scripts/check-contracts.py` asserts all of that, the
+  distinctness included.
 
 ### R1.2 Publish the drift check in the workspace CI
-- **Input:** `contracts/`, each service's vendored `schemas/contracts/`
-- **Output:** a drift check that runs in **this (workspace) repo's CI**, which checks out both
-  submodules and is therefore the only place that can see `contracts/` and both vendored copies at
-  once. It does **not** run in the service repos (ADR 0004, rule 4).
+- **Input:** `contracts/`, `contracts/vendoring.json`, each service's vendored `schemas/contracts/`
+- **Output:** `scripts/check-contracts.py` and `.github/workflows/contracts.yml` — a drift check that
+  runs in **this (workspace) repo's CI**, which checks out both submodules (`submodules: recursive`)
+  and is therefore the only place that can see `contracts/` and both vendored copies at once. It does
+  **not** run in the service repos (ADR 0004, rule 4). The workflow also runs
+  `scripts/verify-queue-topology.py` (R0.3), so contract and topology drift are one gate.
+  The script checks four things: every schema is valid Draft 2020-12 with an `$id` matching its
+  filename; every example behaves as its name declares, with no two invalid examples of one contract
+  breaking the same rule; every manifest entry is byte-identical to the root copy; and every service
+  named in the manifest is a checked-out submodule.
 - **Accept:** the check exits non-zero when a vendored copy differs from the root copy by a single byte,
   proven by a deliberate one-character mutation in a test run; and it fails, rather than passing
   vacuously, when a submodule is not checked out.
+- **Verified 2026-09-25**, from a throwaway copy of the root so `services/` was never written to:
+
+  | Case | Expected | Result |
+  | :--- | :--- | :--- |
+  | registry as committed, at the real root | pass | exit 0, 40/40 checks |
+  | vendored copy byte-identical, manifest entry present | pass | exit 0, 42/42 checks |
+  | one byte mutated in the vendored copy (offset 158, `i` → `T`) | fail | exit 1, names the file and the offset |
+  | temporary manifest entry removed | pass | exit 0, 40/40 checks |
+  | a listed submodule directory emptied | fail | exit 1, "submodule … is not checked out" |
+
+  The examples were additionally re-validated with `date-time` format assertion forced on, matching the
+  CI image (which installs `rfc3339-validator`): no change in outcome, so the result does not depend on
+  which format packages happen to be installed.
 
 ---
 
@@ -103,6 +137,14 @@ Owning repo: **services/ingestion-func**. Gates: `ruff check .` and `pytest` (`d
 - **Accept:** no import of `azure.storage.filedatalake` remains in the repo; the existing integration
   suite passes against Azurite unchanged; the same code path executes locally and in cloud
   configuration, asserted by a test that exercises both credential modes.
+- **Contract differences (target wins)** — `contracts/dataset-available.v1.json`:
+  - `data.storage_path` is constrained to `^https?://[^ ]+$`. The cloud branch emits the `abfss://`
+    form today (`function_app.py:53-66`), which the contract now rejects; the blob form is the only
+    legal value (ADR 0005). Example: `examples/dataset-available.v1/invalid-abfss-storage-path.json`.
+  - The same pattern forbids a **literal space**. `_adls_uri` interpolates the dataset name unencoded,
+    which is why `processing-func` carries a `Replace(" ", "%20")` hack
+    (`ProcessDatasetFunction.cs:70`); percent-encode at the producer so the consumer can drop it
+    (see R3.6).
 
 ### R2.2 Stop emitting the retired event type *(ADR 0002)*
 - **Input:** `src/cloudevents_envelope.py:68`, `src/record_pipeline.py:37`, `topics.md:21`
@@ -117,7 +159,41 @@ Owning repo: **services/ingestion-func**. Gates: `ruff check .` and `pytest` (`d
   `"unknown"` (`:53`)
 - **Accept:** a contract test asserts every emitted envelope validates against
   `schemas/contracts/dataset-available.v1.json`, and an envelope with an unknown extra field fails
-  that test.
+  that test. The extra field must be an **envelope** attribute: `data` is open by construction, so an
+  extra field there is a legal minor version and will *not* fail (see below).
+- **Vendoring:** add `"ingestion-func": ["dataset-available.v1.json", "metadata-file.v1.json"]` to
+  `contracts/vendoring.json` and copy both files byte-for-byte into
+  `services/ingestion-func/schemas/contracts/`. Until that entry exists the workspace drift check has
+  nothing to compare for this service and passes vacuously.
+- **Contract differences (target wins)** — `contracts/dataset-available.v1.json`:
+  - `type` is `const "solar.pvdaq.dataset.available.v1"`; `src/cloudevents_envelope.py:47` emits the
+    unversioned `solar.pvdaq.dataset.available`.
+  - `dataschema` is **required** and `const` the contract's own `$id`
+    (`https://github.com/jorgevr/anomalIA-app/contracts/dataset-available.v1.json`). No `dataschema`
+    attribute is emitted today.
+  - `data.version` is **declared and required**. It is emitted today but rejected by
+    `specs/002-.../contracts/dataset-event.json:119`; the registry copy admits it, which is the
+    decorative-to-enforced fix ADR 0004 exists for.
+  - **The envelope is closed, `data` is open.** Unknown envelope attributes fail; additive `data`
+    fields validate, because ADR 0002 rule 2 makes them a minor version that a consumer holding an
+    older vendored copy must still accept — this is what lets ADR 0006's `device_id` ship without a
+    consumer redeploy. See `examples/dataset-available.v1/valid-rerun-cloud-with-additive-device-id.json`.
+  - `mapping_version` keeps `unknown` as a **legal explicit sentinel** (`^(v[0-9]+|unknown)$`): there is
+    no field mapping at dataset level, and ADR 0006 is deferred. What this task removes is the
+    **hardcoded literal** at `src/cloudevents_envelope.py:53` — the value must come from configuration,
+    as `build_envelope` already does via `config.mapping_version_pvdaq`. ADR 0006 later narrows the
+    pattern to `^v[0-9]+$`, which is a major-version change to this contract.
+  - `correlation_id`, `id` and `ingestion_id` are constrained to **lowercase canonical UUIDs**;
+    `tenant_id` must be non-empty.
+  - Every `format` is backed by an equivalent `pattern`, so the vendored copy validates identically
+    whether or not `jsonschema`'s format assertion and its optional format packages are active. Do not
+    rely on `format` alone in the runtime validator.
+- **Contract differences (target wins)** — `contracts/metadata-file.v1.json`:
+  - Same field set as `specs/002-.../contracts/metadata-file.json`, re-homed with a registry `$id`.
+  - `ingestion.batch_id` is tightened from a free string to a UUID: it is the ADR 0003 business key of
+    the dispatcher run, and `function_app.py:532` already passes `correlation_id` into it.
+  - The sidecar is written but validated by nobody today. ADR 0004 rule 3 requires validation at
+    **write** time against the vendored copy, not only in tests.
 
 ### R2.4 Real trace context *(ADR 0003)*
 - **Input:** `function_app.py:176-178,464-466` (synthesised IDs), `:385-393` (work item),
@@ -128,6 +204,16 @@ Owning repo: **services/ingestion-func**. Gates: `ruff check .` and `pytest` (`d
 - **Accept:** an integration test asserts the `traceparent` on the emitted message parses as valid W3C
   trace context **and** shares its `trace-id` with the span active at emission — i.e. it is no longer a
   random value. Dispatcher and worker spans share one trace ID.
+- **Contract differences (target wins)** — `contracts/dataset-available.v1.json`:
+  - `traceparent` rejects the degenerate all-zero `trace-id` and all-zero `parent-id` that W3C forbids
+    (`examples/dataset-available.v1/invalid-zeroed-traceparent.json`). Note the limit: a `traceparent`
+    synthesised from `uuid4` is **well-formed** and no schema can catch it, which is precisely why this
+    task's acceptance is a test against the live span rather than a contract rule.
+  - `correlation_id` must be a lowercase canonical UUID, so the value set on
+    `ServiceBusMessage.correlation_id` and the envelope copy are the same string, not two spellings.
+  - The contract constrains the **envelope** only. That `traceparent` also travels in Service Bus
+    `application_properties` (ADR 0003 option C, the load-bearing half) is not expressible here and
+    stays a test obligation.
 
 ### R2.5 Correct stale documentation *(ADR 0001)*
 - **Input:** `src/adls_store.py:44`, `CLAUDE.md:10`,
@@ -147,6 +233,29 @@ Owning repo: **services/ingestion-func**. Gates: `ruff check .` and `pytest` (`d
 - **Accept:** a batch containing invalid records produces quarantine objects and **no** message on any
   application-level dead-letter queue; `DEAD_LETTER_QUEUE_NAME` appears nowhere in code or settings; a
   work item with a malformed body still lands in the `pvdaq-historical-work` DLQ.
+- **Vendoring:** add `quarantine-record.v1.json` to this service's `contracts/vendoring.json` entry and
+  validate each `reason.json` against the vendored copy before writing it.
+- **Contract differences (target wins)** — `contracts/quarantine-record.v1.json` replaces the
+  `pvdaq-dead-letter` body at `src/service_bus_emitter.py:38-47`, and the shapes differ substantially:
+  - **Destination:** a blob in `quarantine`, not a Service Bus message. There is no
+    `dead-letter.v1.json` in the registry; see R1.1.
+  - `error_type: "validation_failure"` becomes `reason_code`, drawn from an **open, SCREAMING_SNAKE**
+    vocabulary (`^[A-Z][A-Z0-9_]{2,63}$`) shared with `processing-func` — `SCHEMA_VALIDATION_FAILED`,
+    `TYPE_MISMATCH`, `MISSING_REQUIRED_FIELD`, and so on. The shape is fixed; membership is not, so
+    ADR 0006's `UNMAPPED_SCHEMA` needs no contract change.
+  - `scope` (`row` | `file`) is **new** and required. Ingestion's record rejects are `row`, which makes
+    `record_count` required too.
+  - `source` is a required block carrying `source_vendor`, `site_id`, **`device_id`** (explicitly
+    `null` until ADR 0006), `category`, `source_uri` and `version`. Today's body carries `site_id` and
+    `source_vendor` only, so category, source URI, device and version are all new — ADR 0001 requires
+    full source identity so a quarantined file can be re-driven.
+  - `traceparent` is **required**; no current reject payload carries one. This task therefore depends on
+    R2.4, not merely follows it.
+  - `original_payload` has **no equivalent field**. The rejected records themselves are the quarantined
+    data object (`data_path`); `detail` is the open slot for validator context. Do not smuggle a payload
+    copy into `detail` — quarantine holds the rows.
+  - `error_details[]` maps to `rows[]`, keyed by `row_index` + a per-row `reason_code`, and is explicitly
+    a **truncated** summary rather than the authoritative record.
 
 ---
 
@@ -164,6 +273,13 @@ Owning repo: **services/processing-func**. Gates: `dotnet format --verify-no-cha
   OneLake-flavoured names (`ONELAKE_ENDPOINT`, `OneLakeBronzeWriter`) made storage-neutral
 - **Accept:** no reference to `Azure.Storage.Files.DataLake` remains; `dotnet test` passes; the service
   reads a blob-form `storage_path` end to end.
+- **Contract differences (target wins)** — `contracts/dataset-available.v1.json`:
+  - `data.storage_path` is `^https?://[^ ]+$`, so `AdlsDatasetReader.ParseAdlsUri`'s `abfss://` branch
+    becomes dead code once R2.1 lands.
+  - The pattern also forbids a literal space, which retires the `Replace(" ", "%20")` workaround at
+    `ProcessDatasetFunction.cs:70`: once inbound validation (R3.7) runs, an unencoded path is a
+    contract violation to dead-letter, not a shape to repair. Remove the hack rather than keeping it as
+    belt and braces — it would mask the violation the contract now catches.
 
 ### R3.1 Rename the validated layer to `silver` *(ADR 0001)*
 - **Input:** `Program.cs:152`, `OneLakeBronzeWriter.cs`, `ProcessDatasetCommandHandler.cs:117-120`,
@@ -180,6 +296,29 @@ Owning repo: **services/processing-func**. Gates: `dotnet format --verify-no-cha
 - **Accept:** a file that cannot be parsed at all produces exactly one object in `quarantine` whose
   `reason.json` names the reason code. Adding a new reason code requires no change to any message
   contract.
+- **Vendoring:** add `quarantine-record.v1.json` to this service's `contracts/vendoring.json` entry and
+  validate each `reason.json` against the vendored copy before writing it.
+- **Contract differences (target wins)** — `contracts/quarantine-record.v1.json`. The current
+  dead-letter reason payload (`specs/main/contracts/dead-letter-reason.json`) is *not* the shape:
+  - **Reason codes are renamed and their vocabulary re-typed.** PascalCase `error_type` values become
+    SCREAMING_SNAKE `reason_code` values matching `^[A-Z][A-Z0-9_]{2,63}$` — `UnsupportedEncoding` →
+    `UNSUPPORTED_ENCODING`, `EmptyDataset` → `EMPTY_DATASET`, `ValidationFailed` →
+    `SCHEMA_VALIDATION_FAILED`, plus the file-level `UNPARSEABLE_CSV` this task introduces. The field is
+    a **pattern, never an enum**: that is what makes ADR 0006's `UNMAPPED_SCHEMA` a no-contract-change
+    addition, and it is asserted by
+    `examples/quarantine-record.v1/invalid-lowercase-reason-code.json`.
+  - Only the codes ADR 0001 classifies as *data* problems appear here. `DeserializationFailed`,
+    `InvalidStoragePath`, `UnknownSchema` and `SourceFileNotFound` stay broker DLQ reasons and get no
+    quarantine record at all (R3.3) — there is no `reason_code` for them.
+  - `dataset_id` is **not a field**. Identity is structured: `source.site_id` + `source.category`, from
+    which `dataset_id` is derived. The flat `{datasetId}` string loses the parts a re-drive needs.
+  - `source` additionally requires `device_id` (explicitly `null` for now), `source_uri` and `version`,
+    none of which the current payload carries.
+  - `correlation_id` and `traceparent` are both **required**, so this task depends on R3.8 landing the
+    inbound trace context — a quarantine record written without it fails validation rather than
+    silently losing provenance.
+  - `quarantined_by` and `quarantined_at` are new and required; the reason-code-specific extras
+    (`detected_encoding`, `fail_count`) move into the open `detail` object.
 
 ### R3.3 Split failure routing: DLQ for messages, quarantine for data *(ADR 0001)*
 - **Input:** the eight dead-letter sites at `ProcessDatasetFunction.cs:53,76,104,112,121,135,157,172`,
@@ -201,6 +340,17 @@ Owning repo: **services/processing-func**. Gates: `dotnet format --verify-no-cha
   `quarantine` contains exactly K rows each carrying a reason code, the message is completed, and
   `N−K + K = N` is asserted rather than assumed. A fixture with K=0 writes nothing to `quarantine`; a
   fixture with K=N writes nothing to `silver`.
+- **Contract differences (target wins)**:
+  - `contracts/quarantine-record.v1.json` makes `record_count` **conditionally required**: present and
+    ≥ 1 when `scope` is `row`, omitted when `scope` is `file`. A row-scoped record without it fails
+    (`examples/quarantine-record.v1/invalid-row-scope-without-record-count.json`), so the K in the
+    reconciliation identity is recorded in the artifact, not only in a log line.
+  - Each entry of `rows[]` carries its own `reason_code`, which may differ from the record-level one —
+    a file rejected as `SCHEMA_VALIDATION_FAILED` can hold rows failing for `TYPE_MISMATCH` and
+    `VALUE_OUT_OF_RANGE` (`examples/quarantine-record.v1/valid-row-level-validation-failures.json`).
+  - `contracts/dataset-validated.v1.json` sets `data.record_count` `minimum: 0`, down from the
+    superseded contract's `minimum: 1`. The K=N case above produces a zero-row silver write, which the
+    old bound made unpublishable.
 
 ### R3.5 Partition silver by data date *(ADR 0001)*
 - **Input:** `OneLakeBronzeWriter.cs:42` and `ProcessDatasetCommandHandler.cs:120`, which use processing
@@ -217,6 +367,24 @@ Owning repo: **services/processing-func**. Gates: `dotnet format --verify-no-cha
   against `solar.pvdaq.dataset.available.v1`; unrecognised types dead-lettered with a distinct reason
 - **Accept:** a message with type `some.other.event.v1` dead-letters instead of being processed —
   today it would be processed.
+- **Vendoring:** add
+  `"processing-func": ["dataset-available.v1.json", "dataset-validated.v1.json", "quarantine-record.v1.json"]`
+  to `contracts/vendoring.json` and copy each file byte-for-byte into
+  `services/processing-func/schemas/contracts/`. Until that entry exists the workspace drift check has
+  nothing to compare for this service and passes vacuously.
+- **Contract differences (target wins)** — `contracts/dataset-available.v1.json`:
+  - **Validate the whole envelope, then deserialise.** The partial model at
+    `ProcessDatasetFunction.cs:190-203` covers 6 of 22 fields, so the hand-rolled null checks at
+    `:40-47` are not validation — a message missing `dataschema` or carrying a bad `traceparent` passes
+    them. Run the vendored schema first; the null checks then become redundant.
+  - **`type` is asserted by the contract itself** (`const`), so an unrecognised type fails validation
+    before any type-specific branch runs. Keep the distinct dead-letter reason this task asks for, since
+    a wrong type and a malformed envelope are different operator stories.
+  - **Do not reject unknown `data` fields.** `data` is open (ADR 0002 rule 2): a minor version adding a
+    field must still validate against this vendored copy, or the forward compatibility ADR 0002 promises
+    for ADR 0006's `device_id` does not exist. Unknown **envelope** attributes must still fail.
+  - The contract validator must not depend on optional `format` packages — each `format` is backed by an
+    equivalent `pattern` precisely so .NET and Python validators agree.
 
 ### R3.8 Link the incoming trace *(ADR 0003)*
 - **Input:** `ProcessDatasetFunction.cs` entry, `ProcessDatasetCommandHandler.cs:60-63`;
@@ -232,6 +400,28 @@ Owning repo: **services/processing-func**. Gates: `dotnet format --verify-no-cha
   `application/cloudevents+json`; `bronze_path` → `silver_path`; queue `dataset-validated`
 - **Accept:** the emitted message validates against `contracts/dataset-validated.v1.json` and carries a
   `specversion`.
+- **Contract differences (target wins)** — `contracts/dataset-validated.v1.json`. The flat payload at
+  `DatasetBronzeAvailablePublisher.cs:22-30` shares only two field names with the target:
+  - **It becomes a CloudEvent.** `specversion`, `type`, `source`, `id`, `time`, `datacontenttype` and
+    `dataschema` are all new and all required; `ServiceBusEventPublisher.cs:33-39` must send
+    `application/cloudevents+json` instead of `application/json`. The current shape is kept as a
+    regression fixture: `examples/dataset-validated.v1/invalid-flat-json-not-a-cloudevent.json`.
+  - `source` is `const "/dataset-processing/pvdaq"` — a **new value**; the service publishes no `source`
+    today. It is deliberately not layer-named (ADR 0002 rule 3).
+  - `bronze_path` → `data.silver_path`, in blob form (R3.6). It names the dataset's **partition root**,
+    not a single `data.parquet`: R3.5 can write several date partitions from one file, so a path to one
+    file would be wrong as often as not.
+  - `schema_version` moves from the payload into an **envelope attribute**, alongside a new required
+    `source_vendor`, so both events carry one envelope shape.
+  - `published_at` is **dropped**: the CloudEvents `time` attribute carries exactly that meaning, and two
+    fields for one fact drift apart. It is rejected as an unknown envelope attribute
+    (`examples/dataset-validated.v1/invalid-published-at-alongside-time.json`).
+  - `traceparent` is **required** — the current message carries none, so this depends on R3.8.
+  - `data.record_count` allows 0 (see R3.4).
+  - `correlation_id` must be a lowercase canonical UUID. `ProcessDatasetFunction.cs:57-64` falls back to
+    `Guid.NewGuid()` when the inbound value is absent, which satisfies the shape — but under R3.7 an
+    envelope with no `correlation_id` fails inbound validation first, so that fallback becomes
+    unreachable rather than load-bearing.
 
 ---
 

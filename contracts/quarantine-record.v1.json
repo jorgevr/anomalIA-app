@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jorgevr/anomalIA-app/contracts/quarantine-record.v1.json",
+  "title": "quarantine-record.v1",
+  "description": "Shape of the reason.json sidecar written next to every object in the quarantine container, by either service (ADR 0001). Quarantine holds rejected DATA; the broker dead-letter sub-queue holds unprocessable MESSAGES, and the two must not be conflated. This is an at-rest record rather than a message contract, and it replaces both the retired pvdaq-dead-letter message body and the ad-hoc dead-letter reason payload.",
+  "type": "object",
+  "required": [
+    "reason_code",
+    "scope",
+    "quarantined_at",
+    "quarantined_by",
+    "correlation_id",
+    "traceparent",
+    "source"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+      "description": "Machine-readable rejection reason. The vocabulary is OPEN by decision (ADR 0001, R3.2): it is constrained by shape, not by an enumeration, so a new code such as UNMAPPED_SCHEMA (ADR 0006) can be introduced without a contract change. The examples below are the currently defined codes and are not exhaustive.",
+      "examples": [
+        "UNPARSEABLE_CSV",
+        "UNSUPPORTED_ENCODING",
+        "EMPTY_DATASET",
+        "SCHEMA_VALIDATION_FAILED",
+        "MISSING_REQUIRED_FIELD",
+        "TYPE_MISMATCH",
+        "VALUE_OUT_OF_RANGE",
+        "TIMESTAMP_UNPARSEABLE",
+        "UNMAPPED_SCHEMA"
+      ]
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "row",
+        "file"
+      ],
+      "description": "The value 'row' is the normal case: the invalid rows are quarantined and the valid ones proceed to silver, so silver rows + quarantine rows = bronze source rows always holds. The value 'file' is the exception, reserved for a file with no recoverable rows at all (ADR 0001)."
+    },
+    "quarantined_at": {
+      "$ref": "#/$defs/timestamp",
+      "description": "When the rejection was recorded."
+    },
+    "quarantined_by": {
+      "type": "string",
+      "enum": [
+        "ingestion-func",
+        "processing-func"
+      ],
+      "description": "Service that wrote this record. Both write to quarantine under one vocabulary (ADR 0001): ingestion-func for record-level rejects that previously went to pvdaq-dead-letter, processing-func for row- and file-level rejects that previously dead-lettered."
+    },
+    "correlation_id": {
+      "$ref": "#/$defs/uuid",
+      "description": "ADR 0003 business key of the originating ingestion, stable across retries and re-drives. Required so a quarantined file can be re-driven and attributed once a mapping is published (ADR 0006)."
+    },
+    "traceparent": {
+      "$ref": "#/$defs/traceparent",
+      "description": "ADR 0003: W3C trace context of the operation that rejected the data, so the rejection is traceable back to the ingestion run that produced it."
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^v[0-9]+$",
+      "description": "Vendor record-schema version the data was validated against, when a schema was resolved. Omitted when rejection occurred before schema resolution."
+    },
+    "mapping_version": {
+      "type": "string",
+      "pattern": "^(v[0-9]+|unknown)$",
+      "description": "Vendor field-mapping version in force at rejection, when one was resolved."
+    },
+    "record_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of rejected rows this sidecar accounts for. Required when scope is 'row'; meaningless and omitted when scope is 'file'."
+    },
+    "data_path": {
+      "type": "string",
+      "pattern": "^https?://[^ ]+$",
+      "description": "Absolute blob-endpoint URI of the quarantined object this sidecar describes: the rejected rows, or the whole source file when scope is 'file'. Omitted when the sidecar is the only artifact."
+    },
+    "source": {
+      "type": "object",
+      "description": "Full source identity, retained in every quarantine record (ADR 0001) so a file quarantined as UNMAPPED_SCHEMA can be re-driven once a mapping is published (ADR 0006).",
+      "required": [
+        "source_vendor",
+        "site_id",
+        "device_id",
+        "category",
+        "source_uri",
+        "version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source_vendor": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Vendor identity, e.g. PVDAQ. Not pinned to a single vendor: quarantine is a shared destination."
+        },
+        "site_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "PVDAQ site identifier."
+        },
+        "device_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Device identity within the site. Explicitly null until per-device mapping exists (ADR 0006); required so the field is always stated rather than silently absent."
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Measurement category of the rejected data."
+        },
+        "source_uri": {
+          "type": "string",
+          "minLength": 1,
+          "description": "URI the rejected data was read from: the bronze blob URI for processing-func, the OEDI S3 URL for ingestion-func."
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Append-only ingestion version of the source dataset, so a re-drive targets the same bytes."
+        }
+      }
+    },
+    "rows": {
+      "type": "array",
+      "description": "Per-row failure detail, truncated by the writer rather than unbounded. The authoritative rejected rows are the quarantined data object itself.",
+      "items": {
+        "type": "object",
+        "required": [
+          "row_index",
+          "reason_code"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "row_index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based index of the row within the source file, excluding the header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+            "description": "Row-specific reason code, drawn from the same open vocabulary as the record-level code."
+          },
+          "field": {
+            "type": "string",
+            "description": "Column that failed, when attributable to one."
+          },
+          "rule": {
+            "type": "string",
+            "description": "Validation rule that failed."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Human-readable explanation."
+          }
+        }
+      }
+    },
+    "detail": {
+      "type": "object",
+      "description": "Open extension point for reason-code-specific context, e.g. detected_encoding for UNSUPPORTED_ENCODING or a schema fingerprint for UNMAPPED_SCHEMA. Keeping this object open is what lets the reason-code vocabulary grow without a contract change.",
+      "additionalProperties": true
+    }
+  },
+  "if": {
+    "properties": {
+      "scope": {
+        "const": "row"
+      }
+    },
+    "required": [
+      "scope"
+    ]
+  },
+  "then": {
+    "required": [
+      "record_count"
+    ]
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "Lowercase canonical UUID. The pattern is carried alongside the format so validation is deterministic wherever format assertion is disabled."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$",
+      "description": "RFC 3339 timestamp with an explicit offset."
+    },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+      "allOf": [
+        {
+          "not": {
+            "pattern": "^00-0{32}-"
+          },
+          "description": "W3C forbids an all-zero trace-id; it is also the signature of a synthesised context (ADR 0003)."
+        },
+        {
+          "not": {
+            "pattern": "-0{16}-[0-9a-f]{2}$"
+          },
+          "description": "W3C forbids an all-zero parent-id."
+        }
+      ]
+    }
+  }
+}

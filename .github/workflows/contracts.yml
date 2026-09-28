@@ -1,0 +1,41 @@
+name: contracts
+
+# Contract drift detection runs here and nowhere else: the workspace repo is the only
+# place that checks out contracts/ AND both submodules, so it is the only place that can
+# compare them (ADR 0004 rule 4). The service repos keep runtime validation against their
+# vendored copy; a service branch can be green while its vendored copy is stale, and this
+# workflow is what catches that.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workspace and submodules
+        uses: actions/checkout@v4
+        with:
+          # Both service repos must be present. check-contracts.py FAILS rather than skips
+          # when a submodule listed in contracts/vendoring.json is not checked out, so a
+          # fetch problem here surfaces as a red build instead of a vacuous pass.
+          # If the submodules are private, set a token with read access to them:
+          #   token: ${{ secrets.SUBMODULE_TOKEN }}
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check "jsonschema>=4.21" rfc3339-validator
+
+      - name: Check contracts and vendoring drift
+        run: python scripts/check-contracts.py
+
+      - name: Verify queue topology
+        run: python scripts/verify-queue-topology.py

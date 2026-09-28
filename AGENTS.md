@@ -9,6 +9,11 @@ the operational summary agents actually load.
   CSVs from the OEDI S3 data lake and lands them in ADLS Gen2 `bronze`.
 - `services/processing-func/` (submodule) — .NET 10 Isolated Worker (`DatasetProcessingFunction.slnx`).
   Consumes dataset-available events and processes bronze datasets.
+- `contracts/` — **authoritative** message and at-rest record schemas (ADR 0004), their
+  examples, the `vendoring.json` manifest and `README.md`. Contract Owner only.
+- `scripts/` — root checks: `check-contracts.py` (schemas, examples, vendoring drift),
+  `verify-queue-topology.py` (queue names vs the emulator config). Both run in
+  `.github/workflows/contracts.yml`.
 - `infrastructure/` — local storage (`storage/azurite`) and docker assets for the emulator stack.
 - `servicebus-emulator/` — config for the Azure Service Bus emulator (`config.json`).
 - `docker-compose.yml` — local stack: Azurite, SQL Server (Service Bus emulator dep),
@@ -26,8 +31,12 @@ Bus trigger) consumes it and runs the processing pipeline. Diagram:
 ## 3. Boundaries
 
 - An agent edits only the repo (submodule) it was assigned.
-- Shared contracts — `services/*/schemas/`, message/CloudEvents envelope shapes,
+- Shared contracts — root `contracts/` (authoritative), each service's vendored
+  `schemas/contracts/`, `services/*/schemas/`, message/CloudEvents envelope shapes,
   `.env.example`, root `docker-compose.yml` — change only via the Contract Owner role.
+- A service agent never edits `contracts/` and never hand-edits its vendored copy: it
+  re-copies from the root and runs `python scripts/check-contracts.py`. The copies must be
+  byte-identical, and only the workspace repo's CI can prove it (ADR 0004 rule 4).
 - Specs live in each service's own `specs/` (spec-kit), never at the workspace root.
 - Agents started at the workspace root edit only root files unless explicitly assigned a service.
 

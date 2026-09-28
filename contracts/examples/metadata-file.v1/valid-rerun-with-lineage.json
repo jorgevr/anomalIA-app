@@ -1,0 +1,60 @@
+{
+  "dataset": {
+    "dataset_id": "9068_ac_power",
+    "dataset_type": "time_series",
+    "version": 3,
+    "schema_version": "unknown",
+    "tags": [
+      "pvdaq",
+      "solar"
+    ]
+  },
+  "source": {
+    "source": "pvdaq",
+    "source_type": "s3_public",
+    "endpoint": "pvdaq/2023-solar-data-prize/9068_OEDI/data/",
+    "provider": "NREL",
+    "region": "us-east-1"
+  },
+  "ingestion": {
+    "ingestion_time": "2026-09-25T03:01:09.220145+00:00",
+    "ingestion_id": "5e3b0a71-c4d8-4f29-9a06-7b81e2d3c5f4",
+    "batch_id": "2b6f80d1-5c39-4a72-8e14-9f03c7b2a586",
+    "pipeline": "energy-ingestion-boundary-v1",
+    "trigger_type": "rerun",
+    "retry_count": 2,
+    "source_file_name": "9068_ac_power_data.csv",
+    "file_size_bytes": 1153434,
+    "checksum": "5ec7300926308cd9304077d9c5f9d7aae8330ff255fb047a124e4ff9b5ec1bf8",
+    "ingestion_latency_seconds": 19.8,
+    "status": "success"
+  },
+  "event_time": {
+    "event_time_start": null,
+    "event_time_end": null,
+    "expected_frequency_seconds": 300,
+    "expected_records": null
+  },
+  "data_profile": {
+    "row_count": 9012,
+    "null_percentage": null,
+    "duplicate_rows": null,
+    "min_timestamp": null,
+    "max_timestamp": null,
+    "schema_detected": null,
+    "corrupted_rows": null
+  },
+  "quality_hint": {
+    "basic_quality_score": null,
+    "schema_valid": null,
+    "time_continuity_suspected_gap": null,
+    "notes": [
+      "Source LastModified changed; re-ingesting as version 3."
+    ]
+  },
+  "lineage": {
+    "parent_dataset_version": 2,
+    "rerun_of": "9068_ac_power_v2",
+    "related_incident_id": "INC-2419"
+  }
+}

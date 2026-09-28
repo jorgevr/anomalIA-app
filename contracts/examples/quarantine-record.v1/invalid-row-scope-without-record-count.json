@@ -1,0 +1,42 @@
+{
+  "reason_code": "SCHEMA_VALIDATION_FAILED",
+  "scope": "row",
+  "quarantined_at": "2026-09-24T06:13:05.902441+00:00",
+  "quarantined_by": "processing-func",
+  "correlation_id": "b1d4e8f0-6a22-4c17-9e83-5d0c7f31ab99",
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  "schema_version": "v1",
+  "mapping_version": "v2",
+  "data_path": "http://127.0.0.1:10000/devstoreaccount1/quarantine/dataset=9068_ac_power/ingestion_date=2026-09-24/v1/rejected_rows.csv",
+  "source": {
+    "source_vendor": "PVDAQ",
+    "site_id": 9068,
+    "device_id": null,
+    "category": "ac_power",
+    "source_uri": "http://127.0.0.1:10000/devstoreaccount1/bronze/source=pvdaq/dataset=9068_ac_power/ingestion_date=2026-09-24/9068_ac_power_v1.csv",
+    "version": 1
+  },
+  "rows": [
+    {
+      "row_index": 41,
+      "reason_code": "MISSING_REQUIRED_FIELD",
+      "field": "measured_on",
+      "rule": "required",
+      "detail": "Column is empty."
+    },
+    {
+      "row_index": 402,
+      "reason_code": "VALUE_OUT_OF_RANGE",
+      "field": "ac_power",
+      "rule": "maximum",
+      "detail": "Value 1.4e9 exceeds the mapped maximum for this device class."
+    },
+    {
+      "row_index": 403,
+      "reason_code": "TIMESTAMP_UNPARSEABLE",
+      "field": "measured_on",
+      "rule": "format",
+      "detail": "Value '2026-13-45 99:00' is not a recognised timestamp."
+    }
+  ]
+}
