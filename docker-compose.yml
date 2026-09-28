@@ -134,10 +134,12 @@ services:
       - .env
     environment:
       FUNCTIONS_WORKER_RUNTIME: dotnet-isolated
-      # Storage — Azurite
+      # Storage — Azurite. DATA_STORAGE_CONNECTION and SCHEMA_REGISTRY_BLOB_CONNECTION are two
+      # separate storage accounts in the target design (docs/contracts.md "Shared configuration"),
+      # both pointed at the same emulator locally.
       AzureWebJobsStorage: "${AZURE_STORAGE_CONNECTION}"
-      ADLS_ENDPOINT: "http://azurite:10000/devstoreaccount1"
-      ONELAKE_ENDPOINT: "http://azurite:10000/devstoreaccount1"
+      DATA_STORAGE_CONNECTION: "${AZURE_STORAGE_CONNECTION}"
+      BRONZE_CONTAINER: "bronze"
       SCHEMA_REGISTRY_BLOB_CONNECTION: "${AZURE_STORAGE_CONNECTION}"
       # Service Bus — emulator connection string
       ServiceBusConnection: "${SERVICEBUS_CONNECTION}"
