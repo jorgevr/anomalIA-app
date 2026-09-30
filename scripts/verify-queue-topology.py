@@ -13,6 +13,18 @@ for the settings each service's own config loader treats as a queue name:
     SERVICEBUS_QUEUE_NAME, SERVICEBUS_BRONZE_QUEUE_NAME
 
 Exits non-zero if either side has a queue name the other doesn't.
+
+Also asserts every queue declared in the emulator config sets an explicit
+``MaxDeliveryCount`` no greater than 10. The emulator's enforcement of this
+property is not trustworthy on its own — a schema-load bug on
+`pvdaq-historical-work` once produced ~8,000 redeliveries of a single
+message despite the queue declaring MaxDeliveryCount: 10 at the time (see
+AGENTS.md §6 "Failure classification policy") — so the real backstop is
+code-level dead-lettering of deterministic failures on first delivery; this
+check only guards against a queue silently reverting to the emulator's
+default (which does not bound redelivery at all) or an unreasonably large
+value that would let a poison message loop for a long time before the
+broker-level safety net engages.
 """
 
 from __future__ import annotations
@@ -62,6 +74,19 @@ def emulator_queue_names(config_path: Path) -> set[str]:
     return names
 
 
+MAX_DELIVERY_COUNT_CEILING = 10
+
+
+def emulator_queue_max_delivery_counts(config_path: Path) -> dict[str, int | None]:
+    """Map queue name -> MaxDeliveryCount, or None if the property is absent."""
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    counts: dict[str, int | None] = {}
+    for namespace in config.get("UserConfig", {}).get("Namespaces", []):
+        for queue in namespace.get("Queues", []):
+            counts[queue["Name"]] = queue.get("Properties", {}).get("MaxDeliveryCount")
+    return counts
+
+
 def main() -> int:
     env_path = ROOT / ".env"
     if not env_path.exists():
@@ -72,6 +97,7 @@ def main() -> int:
     configured = configured_queue_names(env_path)
     configured_names = set(configured.values())
     emulator_names = emulator_queue_names(config_path)
+    max_delivery_counts = emulator_queue_max_delivery_counts(config_path)
 
     missing_from_emulator = configured_names - emulator_names
     unused_in_emulator = emulator_names - configured_names
@@ -85,6 +111,10 @@ def main() -> int:
     print()
     print(f"Emulator declares: {sorted(emulator_names)}")
     print()
+    print("MaxDeliveryCount per queue:")
+    for name in sorted(max_delivery_counts):
+        print(f"  {name:<28} = {max_delivery_counts[name]}")
+    print()
 
     ok = True
     if missing_from_emulator:
@@ -93,8 +123,30 @@ def main() -> int:
     if unused_in_emulator:
         print(f"NOTE: declared in emulator but not read by either service's config: {sorted(unused_in_emulator)}")
 
+    unset_max_delivery = sorted(
+        name for name, count in max_delivery_counts.items() if count is None
+    )
+    if unset_max_delivery:
+        ok = False
+        print(f"MISMATCH: MaxDeliveryCount not set (relies on emulator default): {unset_max_delivery}")
+
+    too_high = sorted(
+        name
+        for name, count in max_delivery_counts.items()
+        if count is not None and count > MAX_DELIVERY_COUNT_CEILING
+    )
+    if too_high:
+        ok = False
+        print(
+            f"MISMATCH: MaxDeliveryCount exceeds the {MAX_DELIVERY_COUNT_CEILING} ceiling: "
+            f"{[(n, max_delivery_counts[n]) for n in too_high]}"
+        )
+
     if ok:
-        print("OK: every queue name read from configuration exists in the emulator config.")
+        print(
+            "OK: every queue name read from configuration exists in the emulator config, "
+            f"and every queue declares MaxDeliveryCount <= {MAX_DELIVERY_COUNT_CEILING}."
+        )
         return 0
 
     return 1

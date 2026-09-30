@@ -71,5 +71,36 @@ Learned from real failures in this repo; a task is not done until all that apply
   `docs/` or other paths the Dockerfile does not copy.
 - **Deterministic failures are not retried.** Missing files, invalid config, unknown event
   types or schema violations dead-letter or quarantine on the first attempt; only transient
-  errors (network, throttling, 5xx) go back to Service Bus for redelivery.
+  errors (network, throttling, 5xx) go back to Service Bus for redelivery. See "Failure
+  classification policy" below.
 - **Verification runs use one site / one file**, not the full historical backlog.
+
+### Failure classification policy
+
+- **Message-deterministic failures dead-letter on the first delivery attempt.** A body that
+  won't parse, an envelope or payload that fails schema validation, or a source object that
+  cannot be read (missing, wrong type, malformed) will fail identically on every redelivery —
+  retrying it only burns the redelivery budget that exists for transient conditions and delays
+  the operator signal. Route these straight to a dead-letter destination without looping through
+  Service Bus first.
+- **Environmental, transient or unknown failures redeliver, bounded by an explicit
+  `maxDeliveryCount`, and alert.** Network errors, throttling, 5xx responses and anything not
+  positively classified as message-deterministic get the broker's normal retry path — but every
+  queue must declare its own `maxDeliveryCount` explicitly (never rely on an implicit or
+  emulator default; `scripts/verify-queue-topology.py` asserts this), and exhausting it must
+  page/alert, not silently pile up in a DLQ nobody watches. Do not assume the emulator enforces
+  this correctly on its own — a schema-load bug on `pvdaq-historical-work` once produced
+  ~8,000 redeliveries of a single message despite the queue declaring
+  `MaxDeliveryCount: 10` at the time; the code-level classification above is the real backstop,
+  the broker setting is a second line of defense, not the only one.
+- **Never complete a message whose handling failed without a durable record of the failure.**
+  A message is either fully processed, dead-lettered/quarantined with a reason, or left
+  uncompleted for redelivery — there is no fourth path where a failure is swallowed and the
+  message is acknowledged anyway. (See ADR 0001 "Failure routing"; this is the same
+  no-silent-drops identity `docs/agent-fleet.md` §5 requires at the row level.)
+- **Exception classifiers must be tested against the SDK's real class hierarchy, not a
+  hand-written list.** A `catch`/`except` that names a fixed set of exception types drifts
+  silently when the SDK adds, renames or reclassifies one — the safety property the classifier
+  exists for erodes without any test failing. Assert the classification against the actual SDK
+  types (`isinstance`/`is`-a checks against the real exception hierarchy, or a test that walks
+  it), not a parallel hand-maintained list of type names.

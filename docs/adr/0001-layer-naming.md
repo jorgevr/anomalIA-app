@@ -136,3 +136,94 @@ destination per category across both services, rather than three mechanisms doin
   added without a contract break.
 - Quarantine records **must retain full source identity** (site, device, category, source URI, version)
   and the `correlation_id`, so a file can be re-driven once a mapping is published.
+
+---
+
+## Amendment (proposed, not accepted) — Bronze object name = source object name
+
+- **Status:** Proposed — raised by the Contract Owner for review; not decided, not scheduled.
+- **Owner of the decision:** whoever owns ADR 0001 acceptance (`docs/agent-fleet.md` §3.4) — this
+  section documents the problem and one candidate fix, it does not adopt it.
+
+### Problem
+
+`historical_worker` names the bronze CSV object by *synthesising* a path from `category` and a
+version counter, not from the OEDI source object's own name:
+
+```
+source=pvdaq/dataset={site_id}_{category}/ingestion_date={date}/{site_id}_{category}_v{n}.csv
+```
+(`services/ingestion-func/function_app.py:97-101`, `_adls_path`)
+
+`category` comes from `extract_category(file_name, site_id)`
+(`services/ingestion-func/src/oedi_historical_client.py:32-69`), whose regex strips a trailing
+`_data` or `_data_{start}_{end}` suffix — but only when the date range is hyphenated
+(`\d{4}-\d{2}-\d{2}`). The real OEDI historical filenames use compact `YYYYMMDD` dates with no
+separators (e.g. `9068_ac_power_data_20240101_20250430.csv`), which the regex does not match
+(`oedi_historical_client.py:67`). Today that means the whole `_data_20240101_20250430` suffix
+survives into `category`, so this file and the plain `9068_ac_power_data.csv` land at different
+paths — no collision **today**, but only by accident.
+
+`version` is resolved independently, per **exact S3 key**:
+`existing_versions = await tracker.get_versions(site_id, s3_key)` (`function_app.py:704-705`).
+Two *different* source files that both correctly reduce to the same `category` — which is the
+documented, intended behaviour once the regex above is fixed (`9068_ac_power_data.csv` and
+`9068_ac_power_data_20240101_20250430.csv` are both meant to be category `ac_power`) — would each
+independently resolve `version = 1` on first ingestion, because `get_versions` has never seen
+*their* `s3_key` before. Both would then write to the identical bronze path:
+`source=pvdaq/dataset=9068_ac_power/ingestion_date=2026-09-28/9068_ac_power_v1.csv` — the second
+write **silently overwrites** the first. Fixing the date-format regex in isolation would turn a
+latent bug into an active data-loss bug on the very next historical run that touches a
+multi-file category.
+
+### Proposed decision
+
+**Bronze object name = source object name.** Use the OEDI source file's own basename as the
+bronze object name, verbatim, instead of synthesising `{site_id}_{category}_v{n}.csv`. Each
+distinct source file already has a name that is unique-by-construction within the bucket, so two
+different files can never collide regardless of how `category` is computed or grouped.
+`category`/`dataset_id` remain useful as the **prefix** for grouping and querying, but stop being
+part of the *object's own* name.
+
+Re-ingesting the identical `s3_key` (a genuine re-run, not a different file) is the one case that
+still needs disambiguation on the same `ingestion_date`; the proposal is to append `_v{n}` to the
+source filename **only when `version > 1`**, so the common case (first ingestion of any file)
+needs no synthetic suffix at all and the rare case (same-day re-run of the same file) stays
+disambiguated without inventing a name for files that never had a collision risk in the first
+place.
+
+### Before / after `storage_path` examples
+
+Two real source files for site 9068, category `ac_power` (one current-window, one historical
+date-range chunk), first ingested on the same day:
+
+| | Before (current scheme) | After (proposed) |
+| :--- | :--- | :--- |
+| `9068_ac_power_data.csv` | `.../bronze/source=pvdaq/dataset=9068_ac_power/ingestion_date=2026-09-28/9068_ac_power_v1.csv` | `.../bronze/source=pvdaq/dataset=9068_ac_power/ingestion_date=2026-09-28/9068_ac_power_data.csv` |
+| `9068_ac_power_data_20240101_20250430.csv` | `.../bronze/source=pvdaq/dataset=9068_ac_power/ingestion_date=2026-09-28/9068_ac_power_v1.csv` **← same path, collides once the category regex is fixed** | `.../bronze/source=pvdaq/dataset=9068_ac_power/ingestion_date=2026-09-28/9068_ac_power_data_20240101_20250430.csv` |
+| same file, re-ingested same day (2nd time) | `..._v2.csv` | `9068_ac_power_data_v2.csv` |
+
+### What in `contracts/` and `examples/` would change
+
+- `contracts/dataset-available.v1.json` — **no pattern change.** `data.storage_path`'s
+  `^https?://[^ ]+$` constraint doesn't encode a filename shape, so this proposal doesn't touch
+  the schema itself.
+- `contracts/examples/dataset-available.v1/*.json` — **7 examples** currently embed the
+  `_v{n}.csv` convention in their `storage_path` (`valid-minimal-local.json`,
+  `valid-rerun-cloud-with-additive-device-id.json` and 5 `invalid-*.json` fixtures unrelated to
+  this specific field). Regenerating them isn't required for schema validity (the pattern still
+  matches either naming scheme), but they'd stop reflecting the real producer output and should
+  be refreshed for accuracy — `valid-rerun-cloud-with-additive-device-id.json`'s `..._v3.csv` is
+  the one that specifically exercises the re-ingest-same-key case this proposal keeps a version
+  suffix for.
+- **New example needed** (regardless of examples above): a `dataset-available.v1` pair
+  demonstrating the two-source-files-one-category scenario producing two distinct
+  non-colliding `storage_path` values — this is the regression lock for the bug this proposal
+  fixes; nothing today exercises it.
+- `contracts/metadata-file.v1.json` and its examples — **no shape change.** `dataset_id` and
+  `version` are unaffected; only the bronze CSV's own object name changes.
+
+### Task, if accepted
+
+Tracked as **R2.7** in `docs/contract-migration.md` (ingestion-func), gated on this amendment
+being accepted — not yet actionable.

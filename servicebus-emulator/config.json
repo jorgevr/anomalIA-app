@@ -21,7 +21,7 @@
               "DeadLetteringOnMessageExpiration": false,
               "DefaultMessageTimeToLive": "PT1H",
               "LockDuration": "PT1M",
-              "MaxDeliveryCount": 10,
+              "MaxDeliveryCount": 5,
               "RequiresDuplicateDetection": false,
               "RequiresSession": false
             }

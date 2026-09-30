@@ -165,6 +165,17 @@ Owning repo: **services/ingestion-func**. Gates: `ruff check .` and `pytest` (`d
     which is why `processing-func` carries a `Replace(" ", "%20")` hack
     (`ProcessDatasetFunction.cs:70`); percent-encode at the producer so the consumer can drop it
     (see R3.6).
+- **Deploy note:** `pvdaq-historical-work` may already hold work items a pre-fix dispatcher enqueued
+  with `last_modified: ""` (empty). The schema now requires it non-empty
+  (`schemas/work-item.v1.json`, `minLength: 1` + an ISO-8601 `pattern`), and the dispatcher itself now
+  skips (and logs) any S3 listing entry that lacks one rather than enqueueing it with a blank default
+  (`function_app.py:513-520`). Any such stale item still sitting on the queue from before this landed
+  will fail schema validation and dead-letter on its very first post-deploy delivery — that is correct
+  behaviour per the Failure classification policy (`AGENTS.md` §6): message-deterministic, not worth
+  retrying. **Purge (or drain) `pvdaq-historical-work` before or as part of deploying this change**, so
+  the dead-letter queue doesn't fill with pre-existing stale items on deploy that were never going to
+  succeed — that's expected noise, not a new regression, but it reads as one if nobody is told to
+  expect it.
 
 ### R2.2 Stop emitting the retired event type *(ADR 0002)*
 - **Input:** `src/cloudevents_envelope.py:68`, `src/record_pipeline.py:37`, `topics.md:21`
@@ -282,6 +293,27 @@ Owning repo: **services/ingestion-func**. Gates: `ruff check .` and `pytest` (`d
     copy into `detail` — quarantine holds the rows.
   - `error_details[]` maps to `rows[]`, keyed by `row_index` + a per-row `reason_code`, and is explicitly
     a **truncated** summary rather than the authoritative record.
+
+### R2.7 Bronze object name = source object name *(proposed amendment to ADR 0001 — not yet accepted)*
+- **Status:** Not actionable yet. Gated on the ADR 0001 amendment (`docs/adr/0001-layer-naming.md`
+  "Amendment (proposed, not accepted)") being reviewed and accepted. Listed here so the task exists
+  once that happens, not as authorization to start it.
+- **Input:** `_adls_path` (`function_app.py:97-101`) synthesises the bronze object name from
+  `category` + a version counter; `extract_category`'s date-format regex
+  (`src/oedi_historical_client.py:67`) doesn't match the real OEDI `YYYYMMDD` filenames, which today
+  accidentally avoids a collision that fixing the regex alone would create — see the amendment for
+  the full mechanism.
+- **Output (if accepted):** the bronze object name becomes the OEDI source file's own basename,
+  suffixed with `_v{n}` only when `version > 1` for a same-day re-ingestion of the identical `s3_key`;
+  `category`/`dataset_id` stay the grouping prefix but stop being part of the object's own name.
+- **Accept (if accepted):** two different source files that reduce to the same `category` (a
+  current-window file and a historical date-range chunk) produce two distinct, non-colliding
+  `storage_path` values on the same `ingestion_date`, proven by a test fixture with both. A same-key
+  same-day re-ingestion still produces `..._v2`, `..._v3`, etc., proven by a repeat-ingest test.
+- **Contract impact:** no schema change to `contracts/dataset-available.v1.json` (`storage_path`'s
+  pattern doesn't encode a filename shape); the 7 examples embedding the current `_v{n}.csv`
+  convention should be refreshed, and a new example pair should be added covering the
+  two-files-one-category case — see the amendment for the full list.
 
 ---
 
@@ -452,6 +484,23 @@ Owning repo: **services/processing-func**. Gates: `dotnet format --verify-no-cha
     `Guid.NewGuid()` when the inbound value is absent, which satisfies the shape — but under R3.7 an
     envelope with no `correlation_id` fails inbound validation first, so that fallback becomes
     unreachable rather than load-bearing.
+
+### R3.10 Idempotent consume on the CloudEvent `id`
+- **Input:** `ProcessDatasetFunction.cs` has no idempotency check today — every delivery of a message
+  re-runs the full pipeline, including a *duplicate* delivery of a message that already completed
+  successfully (a lock-renewal race is a real, observed way this happens: a `MessageLockLost` can fire
+  after the handler has already started a redelivered copy of a message whose first copy is still
+  finishing, per R0.9's `9068_tracker` verification run).
+- **Output:** a durable idempotency check keyed on the CloudEvent envelope's `id` (not
+  `correlation_id` — `id` is the CloudEvents-spec identifier for this specific occurrence, stable
+  across redeliveries of the same message, whereas `correlation_id` is a business key that can be
+  shared across related-but-distinct events). Record the `id` durably (e.g. Table Storage, mirroring
+  `ingestion-func`'s own `IdempotencyStore` pattern) only **after** a successful run, never before —
+  so a message that fails mid-processing is still eligible for redelivery, not falsely marked done.
+- **Accept:** a test delivers the identical CloudEvent (same `id`) to `ProcessDatasetFunction` twice.
+  The first delivery produces exactly one `silver` write and one `dataset-validated` publish. The
+  second delivery produces **zero** additional writes and **zero** additional publishes — it is a
+  no-op — and the message still completes (not dead-lettered, not left for redelivery).
 
 ---
 
