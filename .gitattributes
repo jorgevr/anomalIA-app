@@ -4,3 +4,11 @@
 *.bat text eol=crlf
 *.png binary
 *.jpg binary
+
+# Contract schemas must byte-compare identically between this repo and each
+# service's vendored copy (scripts/check-contracts.py, ADR 0004 rule 4) — pin
+# LF so core.autocrlf can't convert them on checkout. The second pattern only
+# covers paths this repo actually tracks; it has no effect inside a submodule's
+# own checkout (see root-r2-3-vendoring report).
+contracts/*.json text eol=lf
+services/*/schemas/contracts/*.json text eol=lf

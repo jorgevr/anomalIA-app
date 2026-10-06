@@ -1,4 +1,4 @@
 {
-  "ingestion-func": [],
-  "processing-func": []
+  "ingestion-func": ["dataset-available.v1.json", "metadata-file.v1.json"],
+  "processing-func": ["dataset-available.v1.json", "dataset-validated.v1.json", "quarantine-record.v1.json"]
 }

@@ -74,6 +74,12 @@ Learned from real failures in this repo; a task is not done until all that apply
   errors (network, throttling, 5xx) go back to Service Bus for redelivery. See "Failure
   classification policy" below.
 - **Verification runs use one site / one file**, not the full historical backlog.
+- **Only one compose stack runs at a time on this machine.** `docker-compose.yml` uses fixed
+  container names and host ports (7071, 7072, 5672, 10000-10002) — a second `docker compose up`
+  from another worktree/branch collides with (or silently reuses) the first instead of
+  running independently. Before claiming a clean-state verification (`down -v` then
+  `up -d --build`), confirm no other agent's stack is running, and never run two stacks in
+  parallel to "save time" on separate tasks.
 
 ### Failure classification policy
 
