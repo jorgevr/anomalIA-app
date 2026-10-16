@@ -1,0 +1,16 @@
+{
+  "id": "Q",
+  "title": "claims an absolute allowed_paths glob",
+  "repo": "root",
+  "base": "main",
+  "branch": "q-branch",
+  "needs": [],
+  "allowed_paths": ["/etc/passwd"],
+  "acceptance": [
+    { "name": "exists", "cwd": ".", "command": "true", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/Q.md",
+  "model": "A",
+  "max_turns": 10,
+  "risk": "docs"
+}

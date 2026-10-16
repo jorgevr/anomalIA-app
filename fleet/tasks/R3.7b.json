@@ -1,0 +1,36 @@
+{
+  "id": "R3.7b",
+  "title": "processing-func: assert exception classifier against the Service Bus SDK's real hierarchy",
+  "repo": "processing-func",
+  "base": "main",
+  "branch": "r3-7b-exception-classifier-hierarchy",
+  "needs": [],
+  "allowed_paths": [
+    "src/**/*.cs",
+    "tests/**/*.cs"
+  ],
+  "acceptance": [
+    {
+      "name": "format",
+      "cwd": ".",
+      "command": "dotnet format --verify-no-changes",
+      "expect_exit": 0
+    },
+    {
+      "name": "build",
+      "cwd": ".",
+      "command": "dotnet build",
+      "expect_exit": 0
+    },
+    {
+      "name": "test",
+      "cwd": ".",
+      "command": "dotnet test",
+      "expect_exit": 0
+    }
+  ],
+  "prompt_file": "fleet/prompts/R3.7b.md",
+  "model": "B",
+  "max_turns": 40,
+  "risk": "code"
+}

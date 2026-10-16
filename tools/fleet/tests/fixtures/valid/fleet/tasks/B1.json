@@ -1,0 +1,18 @@
+{
+  "id": "B1",
+  "title": "ingestion-func: a valid task that depends on A1",
+  "repo": "ingestion-func",
+  "base": "main",
+  "branch": "b1-branch",
+  "needs": [
+    { "task": "A1", "state": "pushed" }
+  ],
+  "allowed_paths": ["src/b1/**"],
+  "acceptance": [
+    { "name": "exists", "cwd": ".", "command": "true", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/B1.md",
+  "model": "B",
+  "max_turns": 20,
+  "risk": "code"
+}

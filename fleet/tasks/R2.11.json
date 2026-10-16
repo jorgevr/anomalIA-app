@@ -1,0 +1,32 @@
+{
+  "id": "R2.11",
+  "title": "ingestion-func: validate the outbound dataset-available envelope before publishing",
+  "repo": "ingestion-func",
+  "base": "main",
+  "branch": "r2-11-validate-outbound-envelope",
+  "needs": [
+    { "task": "R2.9", "state": "merged" }
+  ],
+  "allowed_paths": [
+    "src/**/*.py",
+    "tests/**/*.py"
+  ],
+  "acceptance": [
+    {
+      "name": "ruff",
+      "cwd": ".",
+      "command": "ruff check .",
+      "expect_exit": 0
+    },
+    {
+      "name": "pytest",
+      "cwd": ".",
+      "command": "pytest",
+      "expect_exit": 0
+    }
+  ],
+  "prompt_file": "fleet/prompts/R2.11.md",
+  "model": "B",
+  "max_turns": 30,
+  "risk": "code"
+}

@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jorgevr/anomalIA-app/fleet/schemas/result.v1.json",
+  "title": "fleet.result.v1",
+  "description": "What actually happened when a task ran. Every fact here (SHAs, files changed, acceptance exit codes) is filled in by the orchestrator from things it observed directly -- git, the acceptance commands, the PR API -- never copied from the agent's own account of its work (docs/fleet.md: agents are untrusted narrators). The one field that does carry the agent's own words, agent_report, is explicitly free text and explicitly untrusted.",
+  "type": "object",
+  "required": [
+    "task_id",
+    "status",
+    "started_at",
+    "finished_at",
+    "branch",
+    "base_sha",
+    "head_sha",
+    "commits",
+    "files_changed",
+    "diff_stat",
+    "allowed_paths_violations",
+    "acceptance_results",
+    "agent_report",
+    "pr",
+    "reviewer",
+    "cost"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Id of the fleet/tasks/ task this result belongs to."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["succeeded", "failed", "rejected", "blocked"],
+      "description": "'succeeded' = acceptance passed and no allowed_paths violation; 'failed' = the agent ran but acceptance or review did not pass; 'rejected' = stopped for touching paths outside allowed_paths or another untrusted-narrator violation; 'blocked' = a need was not satisfied or the kill switch (fleet/STOP) was set before the task could start."
+    },
+    "started_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "finished_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "branch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Branch the agent actually committed to, observed from git, not copied from the task file."
+    },
+    "base_sha": {
+      "$ref": "#/$defs/sha",
+      "description": "SHA the branch was created from, read by the orchestrator at task start."
+    },
+    "head_sha": {
+      "$ref": "#/$defs/sha",
+      "description": "SHA of the branch tip, read by the orchestrator at task end."
+    },
+    "commits": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sha" },
+      "description": "Commits between base_sha and head_sha, as read from git log -- not a count or a summary the agent provided."
+    },
+    "files_changed": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Paths touched between base_sha and head_sha, as read from git diff --name-only."
+    },
+    "diff_stat": {
+      "type": "object",
+      "required": ["files", "insertions", "deletions"],
+      "additionalProperties": false,
+      "properties": {
+        "files": { "type": "integer", "minimum": 0 },
+        "insertions": { "type": "integer", "minimum": 0 },
+        "deletions": { "type": "integer", "minimum": 0 }
+      },
+      "description": "git diff --shortstat between base_sha and head_sha."
+    },
+    "allowed_paths_violations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Entries of files_changed that matched none of the task's allowed_paths globs. Empty means the agent stayed in bounds; any entry here forces status to 'rejected'."
+    },
+    "acceptance_results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/acceptanceResult" },
+      "description": "One entry per acceptance check in the task file, in the same order, run by the orchestrator after the agent hands back control."
+    },
+    "agent_report": {
+      "type": "string",
+      "description": "UNTRUSTED. The agent's own free-text account of what it did and why. Useful context for a human or the reviewer, never a substitute for the facts above and never trusted to decide status on its own."
+    },
+    "pr": {
+      "description": "The pull request the orchestrator opened for this branch, or null if none has been opened yet (e.g. status is 'blocked' or 'rejected').",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["number", "url"],
+          "additionalProperties": false,
+          "properties": {
+            "number": { "type": "integer", "minimum": 1 },
+            "url": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "reviewer": {
+      "description": "The fresh-context reviewer's verdict (docs/agent-fleet.md section 3.5), or null if review has not run yet.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["verdict", "findings"],
+          "additionalProperties": false,
+          "properties": {
+            "verdict": { "type": "string", "enum": ["pass", "fail"] },
+            "findings": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "cost": {
+      "type": "object",
+      "required": ["turns", "usd"],
+      "additionalProperties": false,
+      "properties": {
+        "turns": { "type": "integer", "minimum": 0 },
+        "usd": { "type": "number", "minimum": 0 }
+      },
+      "description": "Turns actually used (<= the task's max_turns) and the metered cost of the run."
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$",
+      "description": "RFC 3339 timestamp with an explicit offset."
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "Git object id, abbreviated or full."
+    },
+    "acceptanceResult": {
+      "type": "object",
+      "required": ["name", "exit_code", "output_tail"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Matches the 'name' of the acceptance check in the task file."
+        },
+        "exit_code": {
+          "type": "integer",
+          "description": "Actual exit code observed by the orchestrator."
+        },
+        "output_tail": {
+          "type": "string",
+          "description": "Last portion of the command's combined output, captured by the orchestrator for triage."
+        }
+      }
+    }
+  }
+}

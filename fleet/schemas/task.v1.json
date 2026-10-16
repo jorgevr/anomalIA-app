@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jorgevr/anomalIA-app/fleet/schemas/task.v1.json",
+  "title": "fleet.task.v1",
+  "description": "A unit of work the orchestrator can hand to one agent: one repo, one branch, one worktree (docs/agent-fleet.md principle 5). Everything an agent is permitted to touch and everything the orchestrator will check afterwards is declared here, up front, rather than discovered from the agent's own narration (docs/fleet.md).",
+  "type": "object",
+  "required": [
+    "id",
+    "title",
+    "repo",
+    "branch",
+    "needs",
+    "allowed_paths",
+    "acceptance",
+    "prompt_file",
+    "model",
+    "max_turns",
+    "risk"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "minLength": 1,
+      "description": "Unique task identifier, e.g. 'R2.11', 'CI-4', 'ROOT-DOC-1'. Unique across fleet/tasks/ (checked by fleet.py validate, not by this schema alone, since uniqueness is a cross-file property)."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-line human-readable summary of the task."
+    },
+    "repo": {
+      "type": "string",
+      "enum": ["root", "ingestion-func", "processing-func"],
+      "description": "Which repo the agent runs in: the workspace root, or one of the two service submodules (AGENTS.md repo map). An agent assigned here edits only that repo (AGENTS.md section 3)."
+    },
+    "base": {
+      "type": "string",
+      "minLength": 1,
+      "default": "main",
+      "description": "Branch this task's branch is created from. Defaults to 'main' when omitted; fleet.py applies the default, the schema only documents it."
+    },
+    "branch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Branch name the agent commits to, inside its own worktree (AGENTS.md section 5: one agent = one worktree = one branch)."
+    },
+    "needs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/need" },
+      "description": "Dependencies that must hold before this task can start. A need whose 'task' does not match any id in fleet/tasks/ is treated as an explicit external marker (historical work merged before the fleet existed, e.g. 'R2.9') and is trusted at face value only when its state is 'merged' -- fleet.py has no record to verify an external 'pushed' claim against."
+    },
+    "allowed_paths": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/safeGlob" },
+      "description": "Glob patterns, relative to this task's repo root, naming every path the agent may create or modify. The orchestrator diffs the agent's commits against this list after the run (allowed_paths_violations in result.v1.json); fleet.py plan additionally checks that same-repo, same-layer tasks do not claim overlapping globs."
+    },
+    "acceptance": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/acceptanceCheck" },
+      "description": "Commands the orchestrator itself runs after the agent hands back control -- never the agent's own say-so (docs/fleet.md: agents are untrusted narrators)."
+    },
+    "prompt_file": {
+      "$ref": "#/$defs/safeGlob",
+      "description": "Path, relative to the workspace root, to this task's prompt (fleet/prompts/<id>.md). fleet.py validate checks the file exists."
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Model identifier or capability tier (docs/agent-fleet.md section 2) the agent runs on."
+    },
+    "max_turns": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Hard cap on agent turns for this task, enforced by the orchestrator, not the agent."
+    },
+    "risk": {
+      "type": "string",
+      "enum": ["docs", "ci", "code"],
+      "description": "Coarse blast-radius classification used to decide review depth and serialization caution. 'docs' = prose only, 'ci' = pipeline/workflow config, 'code' = application source."
+    }
+  },
+  "$defs": {
+    "need": {
+      "type": "object",
+      "required": ["task", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Id of the task this depends on, or an external marker id not present in fleet/tasks/."
+        },
+        "state": {
+          "type": "string",
+          "enum": ["pushed", "merged"],
+          "description": "'pushed' = the dependency's branch has been pushed by the orchestrator (not yet merged); 'merged' = it has landed on its base branch."
+        }
+      }
+    },
+    "safeGlob": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$",
+      "description": "A relative glob/path: no leading '/' or '\\\\', no drive letter, and no '..' path segment anywhere (start, middle, or end). Keeps every declared path inside the repo it names."
+    },
+    "acceptanceCheck": {
+      "type": "object",
+      "required": ["name", "cwd", "command", "expect_exit"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Short label for this check, shown in result.v1.json acceptance_results."
+        },
+        "cwd": {
+          "$ref": "#/$defs/safeGlob",
+          "description": "Directory the command runs in, relative to the task's repo root ('.' for the repo root itself)."
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Shell command the orchestrator runs verbatim. Never the agent."
+        },
+        "expect_exit": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Exit code that counts as a pass for this check."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "title": "missing the required id field",
+  "repo": "root",
+  "base": "main",
+  "branch": "bad-branch",
+  "needs": [],
+  "allowed_paths": ["docs/**"],
+  "acceptance": [
+    { "name": "exists", "cwd": ".", "command": "true", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/bad.md",
+  "model": "A",
+  "max_turns": 10,
+  "risk": "docs"
+}

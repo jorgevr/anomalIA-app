@@ -1,0 +1,25 @@
+{
+  "id": "ROOT-DOC-1",
+  "title": "root: document the R2.x contract-validation rollout in docs/contract-migration.md",
+  "repo": "root",
+  "base": "main",
+  "branch": "root-doc-1-contract-migration-update",
+  "needs": [
+    { "task": "R2.9", "state": "merged" }
+  ],
+  "allowed_paths": [
+    "docs/contract-migration.md"
+  ],
+  "acceptance": [
+    {
+      "name": "contracts-check",
+      "cwd": ".",
+      "command": "python scripts/check-contracts.py",
+      "expect_exit": 0
+    }
+  ],
+  "prompt_file": "fleet/prompts/ROOT-DOC-1.md",
+  "model": "A",
+  "max_turns": 15,
+  "risk": "docs"
+}

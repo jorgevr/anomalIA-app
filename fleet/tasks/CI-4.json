@@ -1,0 +1,32 @@
+{
+  "id": "CI-4",
+  "title": "ingestion-func: add ruff + pytest gate to the GitHub Actions workflow",
+  "repo": "ingestion-func",
+  "base": "main",
+  "branch": "ci-4-ruff-pytest-gate",
+  "needs": [
+    { "task": "R2.9", "state": "merged" }
+  ],
+  "allowed_paths": [
+    ".github/workflows/*.yml",
+    "tests/ci/**"
+  ],
+  "acceptance": [
+    {
+      "name": "ruff",
+      "cwd": ".",
+      "command": "ruff check .",
+      "expect_exit": 0
+    },
+    {
+      "name": "pytest",
+      "cwd": ".",
+      "command": "pytest",
+      "expect_exit": 0
+    }
+  ],
+  "prompt_file": "fleet/prompts/CI-4.md",
+  "model": "C",
+  "max_turns": 20,
+  "risk": "ci"
+}
