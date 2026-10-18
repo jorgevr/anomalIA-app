@@ -32,8 +32,8 @@
     },
     "repo": {
       "type": "string",
-      "enum": ["root", "ingestion-func", "processing-func"],
-      "description": "Which repo the agent runs in: the workspace root, or one of the two service submodules (AGENTS.md repo map). An agent assigned here edits only that repo (AGENTS.md section 3)."
+      "enum": ["root", "ingestion-func", "processing-func", "sandbox"],
+      "description": "Which repo the agent runs in: the workspace root, one of the two service submodules (AGENTS.md repo map), or 'sandbox' -- the disposable jorgevr/fleet-sandbox repo FLEET-2's live runner uses for every real run, never root/ingestion-func/processing-func. An agent assigned here edits only that repo (AGENTS.md section 3)."
     },
     "base": {
       "type": "string",

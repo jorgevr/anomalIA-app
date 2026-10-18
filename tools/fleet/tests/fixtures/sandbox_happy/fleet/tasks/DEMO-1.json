@@ -1,0 +1,16 @@
+{
+  "id": "DEMO-1",
+  "title": "sandbox: change one line in README.md",
+  "repo": "sandbox",
+  "base": "main",
+  "branch": "demo-1-readme-line",
+  "needs": [],
+  "allowed_paths": ["README.md"],
+  "acceptance": [
+    { "name": "pytest", "cwd": ".", "command": "python -m pytest", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/DEMO-1.md",
+  "model": "B",
+  "max_turns": 5,
+  "risk": "docs"
+}
