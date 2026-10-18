@@ -130,6 +130,10 @@
         "usd": { "type": "number", "minimum": 0 }
       },
       "description": "Turns actually used (<= the task's max_turns) and the metered cost of the run."
+    },
+    "herdr": {
+      "$ref": "#/$defs/herdr",
+      "description": "Optional. Which herdr pane/CLI/worktree actually ran this task, as observed by the orchestrator -- the executed-reality counterpart to the task file's optional 'agent' field (which only states intent). Omitted when the orchestrator does not track pane-level detail for this run."
     }
   },
   "$defs": {
@@ -161,6 +165,33 @@
         "output_tail": {
           "type": "string",
           "description": "Last portion of the command's combined output, captured by the orchestrator for triage."
+        }
+      }
+    },
+    "herdr": {
+      "type": "object",
+      "required": ["pane", "cli", "worktree"],
+      "additionalProperties": false,
+      "properties": {
+        "pane": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Role/pane name the run actually used."
+        },
+        "cli": {
+          "type": "string",
+          "enum": ["claude", "codex", "gemini", "ollama"],
+          "description": "Which CLI/model family actually ran this task."
+        },
+        "worktree": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Filesystem path of the worktree the pane ran in, as observed by the orchestrator. Unlike allowed_paths this is a real filesystem location (often absolute), not a repo-relative glob."
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque session/log identifier for that pane run, if the CLI exposes one."
         }
       }
     }

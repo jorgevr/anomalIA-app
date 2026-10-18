@@ -49,13 +49,13 @@
     "needs": {
       "type": "array",
       "items": { "$ref": "#/$defs/need" },
-      "description": "Dependencies that must hold before this task can start. A need whose 'task' does not match any id in fleet/tasks/ is treated as an explicit external marker (historical work merged before the fleet existed, e.g. 'R2.9') and is trusted at face value only when its state is 'merged' -- fleet.py has no record to verify an external 'pushed' claim against."
+      "description": "Dependencies that must hold before this task can start. Every need's 'task' MUST resolve to either another id in fleet/tasks/ or an entry in fleet/external.json -- there is no longer an implicit 'unknown id, trust it' fallback. fleet.py plan reads the referenced external.json entry's own hand-maintained 'state' to decide readiness; the need's own 'state' here just records what this task's author believes it needs."
     },
     "allowed_paths": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/safeGlob" },
-      "description": "Glob patterns, relative to this task's repo root, naming every path the agent may create or modify. The orchestrator diffs the agent's commits against this list after the run (allowed_paths_violations in result.v1.json); fleet.py plan additionally checks that same-repo, same-layer tasks do not claim overlapping globs."
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Glob patterns, relative to this task's repo root, naming every path the agent may create or modify. Must be relative with no '..' segment and no absolute/drive prefix -- enforced by fleet.py's check_path_safety, not by this schema's pattern (kept loose here so each failure mode -- absolute vs '..' -- is independently mutation-tested as its own Python check). The orchestrator diffs the agent's commits against this list after the run (allowed_paths_violations in result.v1.json); fleet.py plan additionally checks that same-repo, same-layer tasks do not claim overlapping globs, and that no open fleet/external.json item claims an overlapping path in the same repo."
     },
     "acceptance": {
       "type": "array",
@@ -63,8 +63,9 @@
       "description": "Commands the orchestrator itself runs after the agent hands back control -- never the agent's own say-so (docs/fleet.md: agents are untrusted narrators)."
     },
     "prompt_file": {
-      "$ref": "#/$defs/safeGlob",
-      "description": "Path, relative to the workspace root, to this task's prompt (fleet/prompts/<id>.md). fleet.py validate checks the file exists."
+      "type": "string",
+      "minLength": 1,
+      "description": "Path, relative to the workspace root, to this task's prompt (fleet/prompts/<id>.md). Same relative-path safety rule as allowed_paths, enforced by fleet.py. fleet.py validate also checks the file exists."
     },
     "model": {
       "type": "string",
@@ -80,6 +81,15 @@
       "type": "string",
       "enum": ["docs", "ci", "code"],
       "description": "Coarse blast-radius classification used to decide review depth and serialization caution. 'docs' = prose only, 'ci' = pipeline/workflow config, 'code' = application source."
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Free-text operational cautions a human author wants attached to the task -- e.g. an explicit 'must not run concurrently with X' that isn't (yet) mechanically enforced. fleet.py never acts on these; they are read by the orchestrator/human scheduling the run. Mechanically-enforced overlaps belong in allowed_paths/needs/fleet/external.json instead."
+    },
+    "agent": {
+      "$ref": "#/$defs/agent",
+      "description": "Which herdr pane/CLI this task is meant to run under (docs/agent-fleet.md roles; the fuller per-pane CLI/fencing design lives in the historical .fleet/panes.md note). Optional: a task without it is assumed to run on whatever pane the orchestrator's default assigns for its risk tier."
     }
   },
   "$defs": {
@@ -91,20 +101,14 @@
         "task": {
           "type": "string",
           "minLength": 1,
-          "description": "Id of the task this depends on, or an external marker id not present in fleet/tasks/."
+          "description": "Id of the task this depends on. Must match a fleet/tasks/ id or a fleet/external.json key -- fleet.py validate fails otherwise."
         },
         "state": {
           "type": "string",
           "enum": ["pushed", "merged"],
-          "description": "'pushed' = the dependency's branch has been pushed by the orchestrator (not yet merged); 'merged' = it has landed on its base branch."
+          "description": "'pushed' = the dependency's branch has been pushed by the orchestrator (not yet merged); 'merged' = it has landed on its base branch. For an external.json dependency, the actual readiness fact comes from that entry's own 'state' field, not from this claim."
         }
       }
-    },
-    "safeGlob": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$",
-      "description": "A relative glob/path: no leading '/' or '\\\\', no drive letter, and no '..' path segment anywhere (start, middle, or end). Keeps every declared path inside the repo it names."
     },
     "acceptanceCheck": {
       "type": "object",
@@ -117,7 +121,8 @@
           "description": "Short label for this check, shown in result.v1.json acceptance_results."
         },
         "cwd": {
-          "$ref": "#/$defs/safeGlob",
+          "type": "string",
+          "minLength": 1,
           "description": "Directory the command runs in, relative to the task's repo root ('.' for the repo root itself)."
         },
         "command": {
@@ -129,6 +134,27 @@
           "type": "integer",
           "minimum": 0,
           "description": "Exit code that counts as a pass for this check."
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": ["pane", "cli"],
+      "additionalProperties": false,
+      "properties": {
+        "pane": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Role/pane name this task runs under, e.g. 'Developer', 'Test Author', 'Contract Owner' (docs/agent-fleet.md section 3)."
+        },
+        "cli": {
+          "type": "string",
+          "enum": ["claude", "codex", "gemini", "ollama"],
+          "description": "Which CLI/model family the pane runs. Concrete model names live in that CLI's own config, reviewed quarterly (docs/agent-fleet.md principle 4) -- never hardcoded here."
+        },
+        "fresh_context": {
+          "type": "boolean",
+          "description": "True for reviewer-style panes that must start every run with no prior chat history (docs/agent-fleet.md principle 3: author != reviewer)."
         }
       }
     }

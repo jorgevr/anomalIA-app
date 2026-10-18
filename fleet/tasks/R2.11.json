@@ -1,15 +1,15 @@
 {
   "id": "R2.11",
-  "title": "ingestion-func: validate the outbound dataset-available envelope before publishing",
+  "title": "ingestion-func: delete the orphaned csv_normalizer module and its test",
   "repo": "ingestion-func",
   "base": "main",
-  "branch": "r2-11-validate-outbound-envelope",
+  "branch": "r2-11-delete-csv-normalizer",
   "needs": [
     { "task": "R2.9", "state": "merged" }
   ],
   "allowed_paths": [
-    "src/**/*.py",
-    "tests/**/*.py"
+    "src/csv_normalizer.py",
+    "tests/unit/test_csv_normalizer.py"
   ],
   "acceptance": [
     {
@@ -27,6 +27,6 @@
   ],
   "prompt_file": "fleet/prompts/R2.11.md",
   "model": "B",
-  "max_turns": 30,
+  "max_turns": 20,
   "risk": "code"
 }

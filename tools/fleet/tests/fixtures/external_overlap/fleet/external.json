@@ -1,0 +1,14 @@
+{
+  "EXT-2": {
+    "repo": "ingestion-func",
+    "state": "open",
+    "paths": ["src/thing.py"],
+    "note": "Still open and overlaps O1's allowed_paths -- must be flagged."
+  },
+  "EXT-3": {
+    "repo": "ingestion-func",
+    "state": "merged",
+    "paths": ["src/other.py"],
+    "note": "Already merged, so even though its paths overlap O1's allowed_paths, it must NOT be flagged."
+  }
+}

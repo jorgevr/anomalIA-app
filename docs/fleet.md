@@ -27,10 +27,37 @@ absolute), which commands the orchestrator will run to accept it (`acceptance`),
 prompt lives (`prompt_file`, a placeholder until a human fills it in), and the model/turn
 budget/risk tier it runs under.
 
-`needs` entries reference another task's id with a required `state` (`pushed` or `merged`). A
-`task` id that is not in `fleet/tasks/` is treated as an **explicit external marker** — work that
-predates the fleet or was merged outside it (e.g. `R2.9`) — and is trusted only when its state is
-`merged`; an unresolvable `pushed` claim has nothing behind it and is a validation failure.
+`needs` entries reference another task's id with a required `state` (`pushed` or `merged`) — that
+`state` just records what this task's author *believes* it needs. Every `needs[].task` MUST
+resolve to either another id in `fleet/tasks/` or a key in `fleet/external.json`; anything else is
+a validation failure (there is no implicit "unknown id, trust it" fallback).
+
+Two more optional fields: `notes` (free-text operational cautions a human wants attached, e.g. "must
+not run concurrently with X" that isn't mechanically enforced — `fleet.py` never acts on these) and
+`agent` (which herdr pane/CLI this task is meant to run under — `{pane, cli, fresh_context?}`; the
+fuller per-pane CLI/fencing design lives in the historical `.fleet/panes.md` note referenced from
+`docs/agent-fleet.md`'s "herdr pane" column).
+
+## External work (`fleet/external.json`, `fleet/schemas/external.v1.json`)
+
+The fleet's own hand-maintained registry of work that a `needs` can point to without that work
+having its own file in `fleet/tasks/` — historical work that predates the fleet (e.g. `R2.9`), or
+work tracked elsewhere entirely. Each entry has a `repo`, a `state` (`open` or `merged`), and
+optionally `branch`, `pr`, `paths` and a free-text `note`.
+
+**`state` is edited by hand, by a human, as real-world work actually lands.** `fleet.py plan`
+reads it — never a need's own claim — to decide whether a dependent task is ready:
+
+- A need pointing at an external item with `state: "merged"` is satisfied.
+- A need pointing at an external item with `state: "open"` keeps the task **blocked on** that id
+  until a human flips it.
+- A need pointing at another task in `fleet/tasks/` is always reported as blocking for now —
+  `fleet.py` has no `fleet/results/` tracking yet to know whether that sibling task has actually
+  run, so it never claims one is done on another's behalf.
+
+If an open external item declares `paths`, `fleet.py plan` also flags any fleet task in the same
+`repo` whose `allowed_paths` overlaps them — work-in-flight outside the fleet that could collide
+with a task the orchestrator is about to start, even though that task doesn't `need` it.
 
 ## Result files (`fleet/results/*.json`, `fleet/schemas/result.v1.json`)
 
@@ -39,6 +66,10 @@ files changed, diff stats, acceptance exit codes, PR number — is something the
 observed directly (`git`, the acceptance commands it ran, the PR API), never copied from the
 agent's own narration. `agent_report` is the one field that *is* the agent's words, and it is
 documented as untrusted free text for exactly that reason.
+
+Optional `herdr` field: which pane/CLI/worktree actually ran the task (`{pane, cli, worktree,
+session_id?}`) — the executed-reality counterpart to the task file's optional `agent` field, which
+only states intent. Omitted when the orchestrator doesn't track pane-level detail for a run.
 
 `status` is one of:
 
@@ -53,11 +84,13 @@ documented as untrusted free text for exactly that reason.
 
 1. Orchestrator runs `python tools/fleet/fleet.py validate`. Any `FAIL` stops everything —
    nothing starts on a task set that doesn't check out.
-2. Orchestrator runs `python tools/fleet/fleet.py plan` to get topological layers. Tasks in the
-   same layer with the same `repo` whose `allowed_paths` overlap are printed as pairs that
-   **must be serialized** — never run two such tasks as parallel agents even though the layer
-   says they're both ready.
-3. For each task whose `needs` are satisfied: orchestrator creates the worktree/branch, launches
+2. Orchestrator runs `python tools/fleet/fleet.py plan` to get topological layers plus, per task,
+   `ready` or `blocked on: <ids>`. Tasks in the same layer with the same `repo` whose
+   `allowed_paths` overlap are printed as pairs that **must be serialized** — never run two such
+   tasks as parallel agents even though the layer says they're both ready. Tasks whose
+   `allowed_paths` overlap an *open* `fleet/external.json` item's declared `paths` in the same
+   repo are flagged too, even with no `needs` edge between them.
+3. For each task reported `ready`: orchestrator creates the worktree/branch, launches
    the agent with its `prompt_file`, caps it at `max_turns`.
 4. Agent commits locally and hands back. It does not push, does not open a PR, does not decide
    its own status.
@@ -82,8 +115,10 @@ documented as untrusted free text for exactly that reason.
 ## Validating and planning
 
 ```
-python tools/fleet/fleet.py validate   # schema + ids + needs + acyclic + prompt files exist
-python tools/fleet/fleet.py plan       # topological layers + required serializations
+python tools/fleet/fleet.py validate   # schema + ids + needs (incl. external.json) + acyclic +
+                                        # path safety + prompt files exist
+python tools/fleet/fleet.py plan       # topological layers + per-task ready/blocked-on +
+                                        # required serializations + external path overlaps
 ```
 
 Both default to the workspace root; pass `--base <dir>` to point at a different task set (used

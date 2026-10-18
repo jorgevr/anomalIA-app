@@ -1,0 +1,17 @@
+{
+  "id": "G1",
+  "title": "root: a task with a well-formed optional agent object",
+  "repo": "root",
+  "base": "main",
+  "branch": "g1-branch",
+  "needs": [],
+  "allowed_paths": ["docs/g1/**"],
+  "acceptance": [
+    { "name": "exists", "cwd": ".", "command": "true", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/G1.md",
+  "model": "A",
+  "max_turns": 10,
+  "risk": "docs",
+  "agent": { "pane": "Developer", "cli": "claude", "fresh_context": false }
+}

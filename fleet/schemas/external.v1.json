@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jorgevr/anomalIA-app/fleet/schemas/external.v1.json",
+  "title": "fleet.external.v1",
+  "description": "The fleet's own hand-maintained registry of work that a task's 'needs' can point to without that work having its own file in fleet/tasks/ -- historical work that predates the fleet, or work tracked elsewhere entirely. A need is valid only if it resolves to a fleet/tasks/ id or a key here (fleet.py validate); whether it is actually SATISFIED is decided by this file's own 'state', hand-edited by a human as real-world work lands -- never inferred from a need's own claim (fleet.py plan).",
+  "type": "object",
+  "additionalProperties": false,
+  "patternProperties": {
+    "^[A-Za-z0-9][A-Za-z0-9._-]*$": { "$ref": "#/$defs/item" }
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "required": ["repo", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "enum": ["root", "ingestion-func", "processing-func"],
+          "description": "Which repo this external work landed (or will land) in. Used to scope fleet.py plan's path-overlap check against fleet tasks in the same repo."
+        },
+        "state": {
+          "type": "string",
+          "enum": ["open", "merged"],
+          "description": "The only field a human edits to mark this satisfied. 'open' = still outstanding (needs pointing at it stay blocked; if 'paths' is set, fleet.py plan checks it for overlap against fleet tasks). 'merged' = landed; needs pointing at it are satisfied."
+        },
+        "branch": {
+          "type": ["string", "null"],
+          "description": "Branch name, if known and still relevant (null once merged and deleted, or if never tracked)."
+        },
+        "pr": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["number", "url"],
+              "additionalProperties": false,
+              "properties": {
+                "number": { "type": "integer", "minimum": 1 },
+                "url": { "type": "string", "minLength": 1 }
+              }
+            }
+          ],
+          "description": "PR number/url, if known."
+        },
+        "paths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Globs, relative to 'repo', that this external item touches or claims while 'state' is 'open'. fleet.py plan flags any fleet task in the same repo whose allowed_paths overlaps one of these -- the two could collide if run concurrently. Safety (relative, no '..', no absolute) is enforced the same way as task allowed_paths, by fleet.py's check_path_safety."
+        },
+        "note": {
+          "type": "string",
+          "description": "Free-text context for a human reading this file. Never parsed."
+        }
+      }
+    }
+  }
+}

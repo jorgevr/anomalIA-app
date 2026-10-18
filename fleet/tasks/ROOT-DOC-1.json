@@ -1,6 +1,6 @@
 {
   "id": "ROOT-DOC-1",
-  "title": "root: document the R2.x contract-validation rollout in docs/contract-migration.md",
+  "title": "root: document the R2.x contract-validation rollout",
   "repo": "root",
   "base": "main",
   "branch": "root-doc-1-contract-migration-update",
@@ -8,7 +8,10 @@
     { "task": "R2.9", "state": "merged" }
   ],
   "allowed_paths": [
-    "docs/contract-migration.md"
+    "docs/adr/*",
+    "docs/contracts.md",
+    "docs/contract-migration.md",
+    "contracts/examples/**"
   ],
   "acceptance": [
     {
