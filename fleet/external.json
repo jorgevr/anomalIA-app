@@ -1,0 +1,31 @@
+{
+  "R2.9": {
+    "repo": "ingestion-func",
+    "state": "open",
+    "branch": null,
+    "pr": null,
+    "note": "Retired the legacy per-record pipeline (pvdaq_ingestion/record_pipeline/build_envelope) and its idempotency store; the historical-only dispatcher/worker pair remains (ingestion-func AGENTS.md section 2). Landed on main before this fleet tracked anything, but is tracked here as 'open' until a human has explicitly reviewed and flipped it to 'merged' -- see docs/fleet.md. Flip by hand once confirmed."
+  },
+  "R2.9a": {
+    "repo": "ingestion-func",
+    "state": "merged",
+    "branch": null,
+    "pr": null,
+    "note": "Sub-step of R2.9: 444 -> 326 collected tests after retiring pvdaq_ingestion/record_pipeline/build_envelope (4 new guard tests added). See .github/workflows/ci.yml MIN_EXPECTED_TESTS history."
+  },
+  "R2.9b": {
+    "repo": "ingestion-func",
+    "state": "merged",
+    "branch": null,
+    "pr": null,
+    "note": "Sub-step of R2.9: 326 -> 329, 3 new hygiene tests added."
+  },
+  "R2.9c": {
+    "repo": "ingestion-func",
+    "state": "open",
+    "branch": null,
+    "pr": null,
+    "paths": [".github/workflows/ci.yml"],
+    "note": "Sub-step of R2.9: 329 -> 332, 3 new coverage tests for http_retry.py/observability.py/config.py, which bumped MIN_EXPECTED_TESTS in .github/workflows/ci.yml. Tracked here as still 'open' so fleet.py plan demonstrates flagging a fleet task (CI-4) whose allowed_paths overlaps an open external item's declared paths in the same repo."
+  }
+}

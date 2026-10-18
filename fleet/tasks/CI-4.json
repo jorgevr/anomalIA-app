@@ -1,0 +1,41 @@
+{
+  "id": "CI-4",
+  "title": "ingestion-func: reformat test_adls_store.py and gate CI on ruff format --check",
+  "repo": "ingestion-func",
+  "base": "main",
+  "branch": "ci-4-ruff-format-ci-gate",
+  "needs": [
+    { "task": "R2.9", "state": "merged" }
+  ],
+  "allowed_paths": [
+    "tests/unit/test_adls_store.py",
+    ".github/workflows/ci.yml"
+  ],
+  "acceptance": [
+    {
+      "name": "format-check",
+      "cwd": ".",
+      "command": "ruff format --check tests/unit/test_adls_store.py",
+      "expect_exit": 0
+    },
+    {
+      "name": "ruff",
+      "cwd": ".",
+      "command": "ruff check .",
+      "expect_exit": 0
+    },
+    {
+      "name": "pytest",
+      "cwd": ".",
+      "command": "pytest",
+      "expect_exit": 0
+    }
+  ],
+  "prompt_file": "fleet/prompts/CI-4.md",
+  "model": "C",
+  "max_turns": 20,
+  "risk": "ci",
+  "notes": [
+    "Must not run concurrently with any task or external work item that touches .github/workflows/ci.yml -- see fleet/external.json, entry R2.9c, which fleet.py plan flags against this task's allowed_paths."
+  ]
+}

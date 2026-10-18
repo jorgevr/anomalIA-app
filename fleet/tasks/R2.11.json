@@ -1,0 +1,32 @@
+{
+  "id": "R2.11",
+  "title": "ingestion-func: delete the orphaned csv_normalizer module and its test",
+  "repo": "ingestion-func",
+  "base": "main",
+  "branch": "r2-11-delete-csv-normalizer",
+  "needs": [
+    { "task": "R2.9", "state": "merged" }
+  ],
+  "allowed_paths": [
+    "src/csv_normalizer.py",
+    "tests/unit/test_csv_normalizer.py"
+  ],
+  "acceptance": [
+    {
+      "name": "ruff",
+      "cwd": ".",
+      "command": "ruff check .",
+      "expect_exit": 0
+    },
+    {
+      "name": "pytest",
+      "cwd": ".",
+      "command": "pytest",
+      "expect_exit": 0
+    }
+  ],
+  "prompt_file": "fleet/prompts/R2.11.md",
+  "model": "B",
+  "max_turns": 20,
+  "risk": "code"
+}

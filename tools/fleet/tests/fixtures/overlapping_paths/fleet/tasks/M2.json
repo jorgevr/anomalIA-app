@@ -1,0 +1,16 @@
+{
+  "id": "M2",
+  "title": "root: touches one specific doc file, no dependencies",
+  "repo": "root",
+  "base": "main",
+  "branch": "m2-branch",
+  "needs": [],
+  "allowed_paths": ["docs/overview.md"],
+  "acceptance": [
+    { "name": "exists", "cwd": ".", "command": "true", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/M2.md",
+  "model": "A",
+  "max_turns": 10,
+  "risk": "docs"
+}

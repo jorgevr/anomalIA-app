@@ -1,0 +1,16 @@
+{
+  "id": "O1",
+  "title": "ingestion-func: allowed_paths overlap one open and one merged external item",
+  "repo": "ingestion-func",
+  "base": "main",
+  "branch": "o1-branch",
+  "needs": [],
+  "allowed_paths": ["src/thing.py", "src/other.py"],
+  "acceptance": [
+    { "name": "exists", "cwd": ".", "command": "true", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/O1.md",
+  "model": "A",
+  "max_turns": 10,
+  "risk": "code"
+}

@@ -1,0 +1,16 @@
+{
+  "id": "P",
+  "title": "claims an allowed_paths glob that escapes the repo via ..",
+  "repo": "root",
+  "base": "main",
+  "branch": "p-branch",
+  "needs": [],
+  "allowed_paths": ["../secrets/**"],
+  "acceptance": [
+    { "name": "exists", "cwd": ".", "command": "true", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/P.md",
+  "model": "A",
+  "max_turns": 10,
+  "risk": "docs"
+}

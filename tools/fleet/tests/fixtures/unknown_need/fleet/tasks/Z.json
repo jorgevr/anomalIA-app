@@ -1,0 +1,18 @@
+{
+  "id": "Z",
+  "title": "claims a pushed dependency on a task nobody has ever defined",
+  "repo": "root",
+  "base": "main",
+  "branch": "z-branch",
+  "needs": [
+    { "task": "NOPE-999", "state": "pushed" }
+  ],
+  "allowed_paths": ["docs/z/**"],
+  "acceptance": [
+    { "name": "exists", "cwd": ".", "command": "true", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/Z.md",
+  "model": "A",
+  "max_turns": 10,
+  "risk": "docs"
+}

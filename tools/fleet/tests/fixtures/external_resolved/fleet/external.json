@@ -1,0 +1,9 @@
+{
+  "EXT-1": {
+    "repo": "root",
+    "state": "merged",
+    "branch": null,
+    "pr": null,
+    "note": "Fixture external item: already merged, so N1's need on it resolves and is satisfied."
+  }
+}

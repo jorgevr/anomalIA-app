@@ -1,0 +1,18 @@
+{
+  "id": "N1",
+  "title": "root: needs an external item that is tracked in fleet/external.json",
+  "repo": "root",
+  "base": "main",
+  "branch": "n1-branch",
+  "needs": [
+    { "task": "EXT-1", "state": "merged" }
+  ],
+  "allowed_paths": ["docs/n1/**"],
+  "acceptance": [
+    { "name": "exists", "cwd": ".", "command": "true", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/N1.md",
+  "model": "A",
+  "max_turns": 10,
+  "risk": "docs"
+}

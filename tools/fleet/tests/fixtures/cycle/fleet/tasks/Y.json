@@ -1,0 +1,18 @@
+{
+  "id": "Y",
+  "title": "depends on X, which depends back on Y",
+  "repo": "root",
+  "base": "main",
+  "branch": "y-branch",
+  "needs": [
+    { "task": "X", "state": "pushed" }
+  ],
+  "allowed_paths": ["docs/y/**"],
+  "acceptance": [
+    { "name": "exists", "cwd": ".", "command": "true", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/Y.md",
+  "model": "A",
+  "max_turns": 10,
+  "risk": "docs"
+}

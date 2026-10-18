@@ -1,0 +1,16 @@
+{
+  "id": "A1",
+  "title": "root: a valid task with no dependencies",
+  "repo": "root",
+  "base": "main",
+  "branch": "a1-branch",
+  "needs": [],
+  "allowed_paths": ["docs/a1/**"],
+  "acceptance": [
+    { "name": "exists", "cwd": ".", "command": "true", "expect_exit": 0 }
+  ],
+  "prompt_file": "fleet/prompts/A1.md",
+  "model": "A",
+  "max_turns": 10,
+  "risk": "docs"
+}
