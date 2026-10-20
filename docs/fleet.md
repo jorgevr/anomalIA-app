@@ -111,6 +111,36 @@ only states intent. Omitted when the orchestrator doesn't track pane-level detai
   claimed file list — none of it is a result until the orchestrator has independently observed
   the same thing via git and the acceptance commands. This is why `result.v1.json` has no field
   where the agent's own verdict could stand in for `status`.
+- **Hard default deny, independent of `allowed_paths`:** `.claude/**`, `.mcp.json`, and
+  `.github/workflows/**` are rejected for every task (`status: rejected`, never auto-fixed) even
+  if the task's own `allowed_paths` would otherwise cover them with a glob — the only escape hatch
+  is naming the exact file verbatim in `allowed_paths` (CI-4's literal `.github/workflows/ci.yml`
+  entry is exactly that). A broad `allowed_paths` like `"**"` can never accidentally clear one of
+  these; see `runner.py`'s `is_hard_denied_path`.
+
+## Trust
+
+`herdr agent start` can return `agent_not_ready` before the agent ever reaches a promptable
+state — in practice this is claude's own first-run **workspace-trust dialog** ("Is this a project
+you created or one you trust?"), which appears inside the pane itself, independently of any
+`--permission-mode`/`--allowedTools` flag the runner passed (those only govern what happens
+*after* the agent is past this dialog). The runner cannot answer it and must not try to:
+`AgentBlockedAtStartup` turns this into a normal `blocked` result (notification, captured log,
+`fleet/results/<id>.json`) instead of a crash, and nothing in this codebase sends keystrokes to
+resolve it. A human has to accept the dialog in the pane themselves; `fleet resume <id>` then
+continues from there.
+
+**Observed fact (2026-10-20, two independent live runs against the sandbox):** trust is scoped
+*per worktree directory*, not inherited across sibling worktrees from the same repo. Two separate
+`fleet run` calls against `jorgevr/fleet-sandbox` — `FLEET2-LIVE-1` in
+`C:\code\_fleet\wt\FLEET2-LIVE-1` and `FLEET2-LIVE-2` in `C:\code\_fleet\wt\FLEET2-LIVE-2` — each
+hit the identical, independent trust dialog for their own worktree path. Trusting one worktree
+answers only that one; every new worktree the runner creates needs its own answer. This means a
+fully unattended fleet cannot get past the very first task in a brand-new worktree without a
+human in the loop at least once per worktree path — there is currently no flag this runner uses
+(and none is planned, since the alternative is `--dangerously-skip-permissions`/
+`bypassPermissions`, both explicitly forbidden) that pre-trusts a folder non-interactively for an
+*interactive* session.
 
 ## Validating and planning
 
