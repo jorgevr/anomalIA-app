@@ -422,7 +422,9 @@ def send_kickoff_prompt(runner: CommandRunner, agent_name: str, prompt_path: Pat
 
 
 def agent_status_from_response(doc: dict) -> str:
-    status = _dig(doc, "result", "status") or doc.get("status") or doc.get("error", {}).get("code") if isinstance(doc.get("error"), dict) else None
+    error = doc.get("error")
+    error_code = error.get("code") if isinstance(error, dict) else None
+    status = _dig(doc, "result", "status") or doc.get("status") or error_code
     return status or "unknown"
 
 
@@ -472,6 +474,35 @@ def _tail(text: str, lines: int = 40) -> str:
     return "\n".join(parts[-lines:])
 
 
+# Hard default: these paths are rejected for EVERY task regardless of allowed_paths,
+# unless the task's allowed_paths names that exact file verbatim (not a glob that
+# happens to cover it -- CI-4 names ".github/workflows/ci.yml" literally, which is
+# exactly the intended escape hatch). Independent of, and evaluated before, the
+# ordinary allowed_paths glob-overlap check, so a broad allowed_paths like "**"
+# can never accidentally clear one of these.
+HARD_DENY_GLOBS = [".claude/**", ".mcp.json", ".github/workflows/**"]
+
+
+def is_hard_denied_path(path: str) -> bool:
+    """.claude/** also covers any **/settings*.json nested under a .claude dir --
+    there is no separate narrower rule for that, it is a full subset.
+
+    Deliberately its own segment check, not a reuse of fleet1.globs_overlap (which
+    compares two *patterns* against each other): this is matching one concrete
+    path against a few fixed, simple prefixes, and keeping it independent means a
+    mutation to the ordinary allowed_paths glob machinery can never incidentally
+    also defeat (or fake-trigger) this hard default.
+    """
+    segments = path.replace("\\", "/").split("/")
+    if segments[0] == ".claude":
+        return True
+    if path.replace("\\", "/") == ".mcp.json":
+        return True
+    if len(segments) >= 2 and segments[0] == ".github" and segments[1] == "workflows":
+        return True
+    return False
+
+
 def verify(runner: CommandRunner, task: fleet1.Task, wt_path: Path, base_sha: str) -> VerifyResult:
     log = runner.run(["git", "-C", str(wt_path), "log", "--format=%H%x09%s", f"{base_sha}..HEAD"])
     commit_lines = [line for line in log.stdout.splitlines() if line.strip()]
@@ -492,7 +523,14 @@ def verify(runner: CommandRunner, task: fleet1.Task, wt_path: Path, base_sha: st
     diff = runner.run(["git", "-C", str(wt_path), "diff", "--name-only", f"{base_sha}..HEAD"])
     files_changed = [f for f in diff.stdout.splitlines() if f.strip()]
 
-    violations = [f for f in files_changed if not any(fleet1.globs_overlap(f, glob) for glob in task.allowed_paths)]
+    violations = []
+    for f in files_changed:
+        if is_hard_denied_path(f):
+            if f not in task.allowed_paths:  # exact literal match only -- no glob escape hatch
+                violations.append(f)
+            continue
+        if not any(fleet1.globs_overlap(f, glob) for glob in task.allowed_paths):
+            violations.append(f)
     if violations:
         return VerifyResult(
             status="rejected",
@@ -700,11 +738,13 @@ def run_task(
         task.id,
         {
             "task_id": task.id,
+            "task_path": str(task_path.resolve()),
             "workspace_id": wt_info.workspace_id,
             "tab_id": wt_info.tab_id,
             "pane_id": wt_info.pane_id,
             "worktree_path": str(wt_info.path),
             "agent_name": None,
+            "prompt_sent": False,
             "repo": task.repo,
             "branch": task.branch,
             "created_at": now_iso(),
@@ -712,34 +752,7 @@ def run_task(
     )
 
     outbox_dir, prompt_path = write_outbox_prompt(task, fleet_home)
-
-    base_result = dict(
-        task_id=task.id,
-        started_at=started_at,
-        branch=task.branch,
-        base_sha=base_sha,
-    )
-
-    def blocked_result(agent_name: str | None, note: str) -> dict:
-        result_doc = {
-            **base_result,
-            "status": "blocked",
-            "finished_at": now_iso(),
-            "head_sha": "",
-            "commits": [],
-            "files_changed": [],
-            "diff_stat": {"files": 0, "insertions": 0, "deletions": 0},
-            "allowed_paths_violations": [],
-            "acceptance_results": [],
-            "agent_report": note,
-            "pr": None,
-            "reviewer": None,
-            "cost": {"turns": 0, "usd": 0.0},
-        }
-        write_result(fleet_home, result_doc)
-        if agent_name:
-            capture_agent_log(runner, agent_name, fleet_home, task.id)
-        return result_doc
+    base_result = dict(task_id=task.id, started_at=started_at, branch=task.branch, base_sha=base_sha)
 
     try:
         agent_name = start_agent(runner, task, wt_info.pane_id, outbox_dir)
@@ -747,40 +760,89 @@ def run_task(
         state = load_state(fleet_home, task.id) or {}
         state["agent_name"] = exc.name
         save_state(fleet_home, task.id, state)
-        runner.run(
-            [
-                "herdr", "notification", "show", f"FLEET-2: {task.id} is blocked at startup",
-                "--body", "The agent came up at a dialog (e.g. claude's workspace trust prompt) before it ever reached idle. Review the pane yourself -- the runner will not answer it.",
-            ]
-        )
-        return blocked_result(exc.name, f"agent blocked at startup: {exc.detail}")
+        notify_blocked(runner, task, "blocked at startup")
+        return make_blocked_result(runner, fleet_home, task, base_result, exc.name, f"agent blocked at startup: {exc.detail}")
 
     state = load_state(fleet_home, task.id) or {}
     state["agent_name"] = agent_name
     save_state(fleet_home, task.id, state)
 
     prompt_response = send_kickoff_prompt(runner, agent_name, prompt_path, timeout_ms_for(task))
+    state["prompt_sent"] = True
+    save_state(fleet_home, task.id, state)
+
     status = agent_status_from_response(prompt_response)
     reaction = react_to_status(runner, task, agent_name, status)
-
     if reaction == "needs_human":
-        return blocked_result(agent_name, f"agent status at handoff: {status}")
+        return make_blocked_result(runner, fleet_home, task, base_result, agent_name, f"agent status at handoff: {status}")
 
-    head_sha_result = runner.run(["git", "-C", str(wt_info.path), "rev-parse", "HEAD"])
+    return finish_from_ready_agent(runner, task, wt_info.path, base_sha, base_result, agent_name, fleet_home)
+
+
+def notify_blocked(runner: CommandRunner, task: fleet1.Task, when: str) -> None:
+    runner.run(
+        [
+            "herdr", "notification", "show", f"FLEET-2: {task.id} is blocked ({when})",
+            "--body", "An agent is waiting at an approval/question dialog. Review it yourself -- the runner will not answer it.",
+        ]
+    )
+
+
+def make_blocked_result(
+    runner: CommandRunner,
+    fleet_home: Path,
+    task: fleet1.Task,
+    base_result: dict,
+    agent_name: str | None,
+    note: str,
+) -> dict:
+    result_doc = {
+        **base_result,
+        "status": "blocked",
+        "finished_at": now_iso(),
+        "head_sha": "",
+        "commits": [],
+        "files_changed": [],
+        "diff_stat": {"files": 0, "insertions": 0, "deletions": 0},
+        "allowed_paths_violations": [],
+        "acceptance_results": [],
+        "agent_report": note,
+        "pr": None,
+        "reviewer": None,
+        "cost": {"turns": 0, "usd": 0.0},
+    }
+    write_result(fleet_home, result_doc)
+    if agent_name:
+        capture_agent_log(runner, agent_name, fleet_home, task.id)
+    return result_doc
+
+
+def finish_from_ready_agent(
+    runner: CommandRunner,
+    task: fleet1.Task,
+    wt_path: Path,
+    base_sha: str,
+    base_result: dict,
+    agent_name: str,
+    fleet_home: Path,
+) -> dict:
+    """Shared tail of the pipeline: the agent has reached idle/done. Verify from
+    git/subprocesses, capture the log, push + PR if clean, write the result. Used
+    by both `run` (fresh) and `resume` (reusing an existing worktree/agent)."""
+    head_sha_result = runner.run(["git", "-C", str(wt_path), "rev-parse", "HEAD"])
     head_sha = head_sha_result.stdout.strip()
 
-    verify_result = verify(runner, task, wt_info.path, base_sha)
+    verify_result = verify(runner, task, wt_path, base_sha)
 
-    agent_note = ""
     agent_log_path = capture_agent_log(runner, agent_name, fleet_home, task.id)
     agent_note = agent_log_path.read_text(encoding="utf-8")[-2000:] if agent_log_path.is_file() else ""
 
-    diff_stat_result = runner.run(["git", "-C", str(wt_info.path), "diff", "--shortstat", f"{base_sha}..HEAD"])
+    diff_stat_result = runner.run(["git", "-C", str(wt_path), "diff", "--shortstat", f"{base_sha}..HEAD"])
     diff_stat = _parse_shortstat(diff_stat_result.stdout)
 
     pr_info = None
     if verify_result.status == "succeeded":
-        pr_info = push_and_create_pr(runner, task, wt_info.path, verify_result, agent_note)
+        pr_info = push_and_create_pr(runner, task, wt_path, verify_result, agent_note)
         if pr_info is None:
             verify_result.status = "failed"
             verify_result.note = (verify_result.note + "; push or gh pr create failed").strip("; ")
@@ -804,6 +866,87 @@ def run_task(
     }
     write_result(fleet_home, result_doc)
     return result_doc
+
+
+def existing_result_pr(fleet_home: Path, task_id: str) -> dict | None:
+    """Its own function (not inlined) so a mutation test can disable exactly this
+    'already has a PR' guard without having to fake every other load_json call
+    resume_task makes along the way."""
+    path = fleet_home_dirs(fleet_home)["results"] / f"{task_id}.json"
+    if not path.is_file():
+        return None
+    existing, _ = fleet1.load_json(path)
+    if existing:
+        return existing.get("pr")
+    return None
+
+
+class ResumeRefused(Exception):
+    """A precondition for `resume` was not met -- a bad worktree/missing state/
+    already has a PR. Distinct from a 'blocked' result: this means resume should
+    not have been called at all, not that the task is legitimately still waiting."""
+
+
+def resume_task(
+    runner: CommandRunner,
+    task_id: str,
+    fleet_home: Path = DEFAULT_FLEET_HOME,
+) -> dict:
+    """Continues a task from the 'agent start' step, reusing the worktree and pane
+    recorded in fleet_home/state/<id>.json. Never calls `herdr worktree create`.
+    Refuses (raises ResumeRefused) if there is no recorded state, the worktree no
+    longer exists, or a result already records a PR for this task."""
+    state = load_state(fleet_home, task_id)
+    if state is None:
+        raise ResumeRefused(f"no recorded state for task {task_id!r} under {fleet_home} -- nothing to resume")
+
+    existing_pr = existing_result_pr(fleet_home, task_id)
+    if existing_pr:
+        raise ResumeRefused(f"task {task_id!r} already has a PR ({existing_pr.get('url')}) -- refusing to resume")
+
+    task_path_value = state.get("task_path")
+    if not task_path_value:
+        raise ResumeRefused(f"recorded state for {task_id!r} has no task_path -- cannot reload the task definition")
+    task = load_single_task(Path(task_path_value))
+
+    wt_path = Path(state["worktree_path"])
+    wt_check = runner.run(["git", "-C", str(wt_path), "rev-parse", "--is-inside-work-tree"])
+    if not (wt_check.ok and wt_check.stdout.strip() == "true"):
+        raise ResumeRefused(f"worktree {wt_path} no longer exists or is not a git worktree -- refusing to resume")
+
+    agent_name = state.get("agent_name")
+    if not agent_name:
+        raise ResumeRefused(f"no agent_name recorded for {task_id!r} -- never got as far as starting an agent, nothing to resume")
+
+    agent_info = runner.run(["herdr", "agent", "get", agent_name])
+    if not agent_info.ok:
+        raise ResumeRefused(f"herdr agent get {agent_name} failed -- pane/agent no longer exists, cannot resume: {agent_info.stderr or agent_info.stdout}")
+    try:
+        live_status = json.loads(agent_info.stdout)["result"]["agent"]["agent_status"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        raise ResumeRefused(f"could not parse herdr agent get response: {agent_info.stdout!r}")
+
+    repo_path = REPO_PATHS[task.repo]
+    base_sha = runner.run(["git", "-C", str(repo_path), "rev-parse", f"origin/{task.base}"]).stdout.strip()
+    base_result = dict(task_id=task.id, started_at=now_iso(), branch=task.branch, base_sha=base_sha)
+
+    reaction = react_to_status(runner, task, agent_name, live_status)
+    if reaction == "needs_human":
+        if live_status == "blocked":
+            notify_blocked(runner, task, "still blocked on resume")
+        return make_blocked_result(runner, fleet_home, task, base_result, agent_name, f"agent status on resume: {live_status}")
+
+    if not state.get("prompt_sent"):
+        outbox_dir, prompt_path = write_outbox_prompt(task, fleet_home)
+        prompt_response = send_kickoff_prompt(runner, agent_name, prompt_path, timeout_ms_for(task))
+        state["prompt_sent"] = True
+        save_state(fleet_home, task_id, state)
+        status = agent_status_from_response(prompt_response)
+        reaction = react_to_status(runner, task, agent_name, status)
+        if reaction == "needs_human":
+            return make_blocked_result(runner, fleet_home, task, base_result, agent_name, f"agent status at handoff: {status}")
+
+    return finish_from_ready_agent(runner, task, wt_path, base_sha, base_result, agent_name, fleet_home)
 
 
 def _parse_shortstat(text: str) -> dict:
@@ -907,6 +1050,9 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--allow-untested", action="store_true")
     run_p.add_argument("--dry-run", action="store_true", help="Print every command that would run; execute nothing that mutates the world.")
 
+    resume_p = sub.add_parser("resume", help="Continue a task from 'agent start', reusing its recorded worktree/pane. Never calls worktree create.")
+    resume_p.add_argument("task_id")
+
     sub.add_parser("status", help="Print the table of recorded fleet tasks.")
 
     clean_p = sub.add_parser("clean", help="Remove a worktree for a recorded task id. Never automatic.")
@@ -921,6 +1067,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "clean":
         print(clean_task(RealCommandRunner(), args.fleet_home, args.task_id))
         return 0
+
+    if args.cmd == "resume":
+        try:
+            result_doc = resume_task(RealCommandRunner(), args.task_id, args.fleet_home)
+        except ResumeRefused as exc:
+            print(f"refused: {exc}")
+            return 2
+        print(json.dumps(result_doc, indent=2))
+        return 0 if result_doc.get("status") == "succeeded" else 1
 
     if args.cmd == "run":
         task_path = resolve_task_path(args.task)

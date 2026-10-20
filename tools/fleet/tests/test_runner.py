@@ -341,7 +341,265 @@ def test_verify_rejects_commit_message_missing_task_id_prefix():
     assert "do not start with task id" in result.note
 
 
+# --- hard default deny: .claude/**, .mcp.json, .github/workflows/** ---------------
+
+
+def _make_task(allowed_paths, task_id="HD-1"):
+    doc = {
+        "id": task_id,
+        "title": "hard-deny test task",
+        "repo": "sandbox",
+        "branch": "hd-1-branch",
+        "needs": [],
+        "allowed_paths": allowed_paths,
+        "acceptance": [],
+        "prompt_file": "fleet/prompts/HD-1.md",
+        "model": "A",
+        "max_turns": 5,
+        "risk": "code",
+    }
+    return runner.fleet1.Task(Path("/fake/fleet/tasks/HD-1.json"), doc)
+
+
+def _verify_with_changed_files(task, files: list[str]):
+    fake = FakeCommandRunner(
+        script={
+            ("git", "-C", r"C:\wt", "log", "--format=%H%x09%s", "base123..HEAD"): _git_log_result(
+                [("abc1234", f"{task.id}: change files")]
+            ),
+            ("git", "-C", r"C:\wt", "diff", "--name-only", "base123..HEAD"): ok(stdout="\n".join(files)),
+            ("sh", "-lc"): ok(stdout="ok"),
+        }
+    )
+    return runner.verify(fake, task, Path(r"C:\wt"), "base123")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [".claude/settings.json", ".claude/skills/foo/SKILL.md", ".mcp.json", ".github/workflows/ci.yml"],
+)
+def test_hard_deny_rejects_sensitive_paths_despite_broad_allowed_paths(path):
+    task = _make_task(allowed_paths=["**"])  # as broad as it gets
+    result = _verify_with_changed_files(task, [path])
+    assert result.status == "rejected"
+    assert result.allowed_paths_violations == [path]
+
+
+def test_hard_deny_allows_exact_literal_exception_like_ci4():
+    task = _make_task(allowed_paths=[".github/workflows/ci.yml", "tests/unit/test_adls_store.py"])
+    result = _verify_with_changed_files(task, [".github/workflows/ci.yml"])
+    assert result.status == "succeeded"
+
+
+def test_hard_deny_exact_literal_exception_does_not_cover_other_files_in_same_dir():
+    task = _make_task(allowed_paths=[".github/workflows/ci.yml"])
+    result = _verify_with_changed_files(task, [".github/workflows/ci.yml", ".github/workflows/other.yml"])
+    assert result.status == "rejected"
+    assert result.allowed_paths_violations == [".github/workflows/other.yml"]
+
+
+def test_mutation_hard_deny_check_disabled_breaks_hard_deny_tests(monkeypatch):
+    task = _make_task(allowed_paths=["**"])
+    result = _verify_with_changed_files(task, [".mcp.json"])
+    assert result.status == "rejected", "sanity: real check rejects .mcp.json even under a broad allowed_paths"
+
+    monkeypatch.setattr(runner, "is_hard_denied_path", lambda path: False)
+    result2 = _verify_with_changed_files(task, [".mcp.json"])
+    assert result2.status != "rejected", "mutated hard-deny check wrongly allowed .mcp.json through"
+
+
 # --- status / clean --------------------------------------------------------------
+
+
+# --- resume ------------------------------------------------------------------------
+
+
+def _resume_state(tmp_path, agent_name="demo-1", prompt_sent=False, wt_path=None):
+    task_path = _task_path("sandbox_happy", "DEMO-1")
+    wt_path = wt_path or (tmp_path / "wt" / "DEMO-1")
+    state = {
+        "task_id": "DEMO-1",
+        "task_path": str(task_path.resolve()),
+        "workspace_id": "w9",
+        "tab_id": "w9:t1",
+        "pane_id": "w9:p1",
+        "worktree_path": str(wt_path),
+        "agent_name": agent_name,
+        "prompt_sent": prompt_sent,
+        "repo": "sandbox",
+        "branch": "demo-1-branch",
+        "created_at": "2026-10-18T20:00:00Z",
+    }
+    runner.save_state(tmp_path, "DEMO-1", state)
+    return state, wt_path
+
+
+def test_resume_refuses_without_recorded_state(tmp_path):
+    fake = FakeCommandRunner(script={}, default=ok())
+    with pytest.raises(runner.ResumeRefused, match="no recorded state"):
+        runner.resume_task(fake, "NEVER-RAN", tmp_path)
+
+
+def test_resume_refuses_when_worktree_missing(tmp_path):
+    _, wt_path = _resume_state(tmp_path)
+    fake = FakeCommandRunner(
+        script={("git", "-C", str(wt_path), "rev-parse", "--is-inside-work-tree"): fail(returncode=128, stderr="not a git repository")}
+    )
+    with pytest.raises(runner.ResumeRefused, match="no longer exists"):
+        runner.resume_task(fake, "DEMO-1", tmp_path)
+
+
+def test_mutation_resume_worktree_check_disabled_breaks_missing_worktree_test(monkeypatch, tmp_path):
+    _, wt_path = _resume_state(tmp_path)
+    fake = FakeCommandRunner(
+        script={("git", "-C", str(wt_path), "rev-parse", "--is-inside-work-tree"): fail(returncode=128, stderr="not a git repository")}
+    )
+    with pytest.raises(runner.ResumeRefused):
+        runner.resume_task(fake, "DEMO-1", tmp_path)  # sanity
+
+    # Mutate: pretend the worktree check always succeeds.
+    original_run = FakeCommandRunner.run
+
+    def always_ok_run(self, cmd, **kwargs):
+        if cmd[:3] == ["git", "-C", str(wt_path)] and cmd[3:5] == ["rev-parse", "--is-inside-work-tree"]:
+            return ok(stdout="true")
+        return original_run(self, cmd, **kwargs)
+
+    monkeypatch.setattr(FakeCommandRunner, "run", always_ok_run)
+    fake2 = FakeCommandRunner(
+        script={
+            ("herdr", "agent", "get"): fail(returncode=1, stderr='{"error":{"code":"no_such_agent"}}'),
+        }
+    )
+    with pytest.raises(runner.ResumeRefused, match="pane/agent no longer exists"):
+        # still refused, but for a DIFFERENT reason now (agent gone, not worktree) --
+        # proving the worktree-missing case alone is no longer caught once mutated.
+        runner.resume_task(fake2, "DEMO-1", tmp_path)
+
+
+def test_resume_refuses_when_result_already_has_pr(tmp_path):
+    _resume_state(tmp_path)
+    runner.write_result(
+        tmp_path,
+        {
+            "task_id": "DEMO-1",
+            "status": "succeeded",
+            "started_at": "2026-10-18T20:00:00Z",
+            "finished_at": "2026-10-18T20:05:00Z",
+            "branch": "demo-1-branch",
+            "base_sha": "abc1234",
+            "head_sha": "def5678",
+            "commits": ["def5678"],
+            "files_changed": ["README.md"],
+            "diff_stat": {"files": 1, "insertions": 1, "deletions": 0},
+            "allowed_paths_violations": [],
+            "acceptance_results": [],
+            "agent_report": "",
+            "pr": {"number": 7, "url": "https://github.com/jorgevr/fleet-sandbox/pull/7"},
+            "reviewer": None,
+            "cost": {"turns": 1, "usd": 0.0},
+        },
+    )
+    fake = FakeCommandRunner(script={}, default=ok())
+    with pytest.raises(runner.ResumeRefused, match="already has a PR"):
+        runner.resume_task(fake, "DEMO-1", tmp_path)
+
+
+def test_mutation_resume_pr_check_disabled_breaks_already_has_pr_test(monkeypatch, tmp_path):
+    _resume_state(tmp_path)
+    runner.write_result(
+        tmp_path,
+        {
+            "task_id": "DEMO-1", "status": "succeeded", "started_at": "2026-10-18T20:00:00Z",
+            "finished_at": "2026-10-18T20:05:00Z", "branch": "demo-1-branch", "base_sha": "abc1234",
+            "head_sha": "def5678", "commits": ["def5678"], "files_changed": ["README.md"],
+            "diff_stat": {"files": 1, "insertions": 1, "deletions": 0}, "allowed_paths_violations": [],
+            "acceptance_results": [], "agent_report": "", "pr": {"number": 7, "url": "https://x/pull/7"},
+            "reviewer": None, "cost": {"turns": 1, "usd": 0.0},
+        },
+    )
+    fake = FakeCommandRunner(script={}, default=ok())
+    with pytest.raises(runner.ResumeRefused, match="already has a PR"):
+        runner.resume_task(fake, "DEMO-1", tmp_path)  # sanity
+
+    monkeypatch.setattr(runner, "existing_result_pr", lambda fleet_home, task_id: None)
+    fake2 = FakeCommandRunner(
+        script={
+            ("git", "-C"): ok(stdout="true"),
+            ("herdr", "agent", "get"): fail(returncode=1, stderr='{"error":{"code":"no_such_agent"}}'),
+        },
+        default=ok(stdout="true"),
+    )
+    # With the PR guard mutated to always report "no PR", resume proceeds past it
+    # to the next check instead of refusing immediately for "already has a PR".
+    with pytest.raises(runner.ResumeRefused, match="pane/agent no longer exists"):
+        runner.resume_task(fake2, "DEMO-1", tmp_path)
+
+
+def test_resume_after_blocked_reports_still_blocked(tmp_path):
+    _, wt_path = _resume_state(tmp_path, agent_name="demo-1", prompt_sent=False)
+    sandbox_repo = str(runner.REPO_PATHS["sandbox"])
+    fake = FakeCommandRunner(
+        script={
+            ("git", "-C", str(wt_path), "rev-parse", "--is-inside-work-tree"): ok(stdout="true"),
+            ("git", "-C", sandbox_repo, "rev-parse", "origin/main"): ok(stdout="abc1234"),
+            ("herdr", "agent", "get"): ok(stdout=json.dumps({"result": {"agent": {"agent_status": "blocked"}}})),
+            ("herdr", "notification", "show"): ok(),
+            ("herdr", "agent", "read"): ok(stdout=""),
+        }
+    )
+    result = runner.resume_task(fake, "DEMO-1", tmp_path)
+    assert result["status"] == "blocked"
+    assert "still blocked" in result["agent_report"] or "blocked" in result["agent_report"]
+    assert any(c[:3] == ["herdr", "notification", "show"] for c in fake.calls)
+    # must NOT have sent a real kickoff prompt while still blocked
+    assert not any(c[:3] == ["herdr", "agent", "prompt"] for c in fake.calls)
+
+
+def _ready_to_verify_script(wt_path: Path, agent_status: str = "idle") -> dict:
+    """Precise command->response keys for a resume that reaches finish_from_ready_agent
+    with zero commits ahead of base (-> status 'rejected', but a schema-valid result:
+    head_sha/base_sha must still look like real shas, never the string "true")."""
+    sandbox_repo = str(runner.REPO_PATHS["sandbox"])
+    return {
+        ("git", "-C", str(wt_path), "rev-parse", "--is-inside-work-tree"): ok(stdout="true"),
+        ("git", "-C", sandbox_repo, "rev-parse", "origin/main"): ok(stdout="abc1234"),
+        ("git", "-C", str(wt_path), "rev-parse", "HEAD"): ok(stdout="abc1234"),
+        ("git", "-C", str(wt_path), "log", "--format=%H%x09%s"): ok(stdout=""),
+        ("git", "-C", str(wt_path), "diff", "--shortstat"): ok(stdout=""),
+        ("herdr", "agent", "get"): ok(stdout=json.dumps({"result": {"agent": {"agent_status": agent_status}}})),
+        ("herdr", "agent", "read"): ok(stdout=""),
+    }
+
+
+def test_resume_sends_prompt_when_not_yet_sent_and_agent_ready(tmp_path):
+    _, wt_path = _resume_state(tmp_path, agent_name="demo-1", prompt_sent=False)
+    script = _ready_to_verify_script(wt_path)
+    script[("herdr", "agent", "prompt")] = ok(stdout=json.dumps({"result": {"status": "idle"}}))
+    fake = FakeCommandRunner(script=script)
+
+    result = runner.resume_task(fake, "DEMO-1", tmp_path)
+    assert any(c[:3] == ["herdr", "agent", "prompt"] for c in fake.calls)
+    assert result["status"] == "rejected"  # no commits ahead of base in this fake scenario
+    state_after = runner.load_state(tmp_path, "DEMO-1")
+    assert state_after["prompt_sent"] is True
+
+
+def test_resume_skips_prompt_when_already_sent(tmp_path):
+    _, wt_path = _resume_state(tmp_path, agent_name="demo-1", prompt_sent=True)
+    fake = FakeCommandRunner(script=_ready_to_verify_script(wt_path))
+
+    result = runner.resume_task(fake, "DEMO-1", tmp_path)
+    assert not any(c[:3] == ["herdr", "agent", "prompt"] for c in fake.calls)
+    assert result["status"] == "rejected"  # no commits ahead of base in this fake scenario
+
+
+def test_resume_never_calls_worktree_create(tmp_path):
+    _, wt_path = _resume_state(tmp_path, agent_name="demo-1", prompt_sent=True)
+    fake = FakeCommandRunner(script=_ready_to_verify_script(wt_path))
+
+    runner.resume_task(fake, "DEMO-1", tmp_path)
+    assert not any(c[:3] == ["herdr", "worktree", "create"] for c in fake.calls)
 
 
 def test_clean_requires_recorded_state(tmp_path):
