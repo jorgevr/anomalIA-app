@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "docker-compose-creator",
+  "owner": "jeremylongshore",
+  "repo": "claude-code-plugins-plus-skills",
+  "path": "planned-skills/generated/01-devops-basics/docker-compose-creator",
+  "branch": "main",
+  "sha": "6696f7cab405417f75dbbc831230f2066b1abf17",
+  "source": "manual"
+}
