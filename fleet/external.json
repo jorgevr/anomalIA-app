@@ -1,7 +1,7 @@
 {
   "R2.9": {
     "repo": "ingestion-func",
-    "state": "open",
+    "state": "merged",
     "branch": null,
     "pr": null,
     "note": "Retired the legacy per-record pipeline (pvdaq_ingestion/record_pipeline/build_envelope) and its idempotency store; the historical-only dispatcher/worker pair remains (ingestion-func AGENTS.md section 2). Landed on main before this fleet tracked anything, but is tracked here as 'open' until a human has explicitly reviewed and flipped it to 'merged' -- see docs/fleet.md. Flip by hand once confirmed."
@@ -22,7 +22,7 @@
   },
   "R2.9c": {
     "repo": "ingestion-func",
-    "state": "open",
+    "state": "merged",
     "branch": null,
     "pr": null,
     "paths": [".github/workflows/ci.yml"],
