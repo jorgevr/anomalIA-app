@@ -3,14 +3,14 @@
     "repo": "ingestion-func",
     "state": "merged",
     "branch": null,
-    "pr": 9,
+    "pr": null,
     "note": "Merged in ingestion PR #9."
   },
   "R2.9a": {
     "repo": "ingestion-func",
     "state": "merged",
     "branch": null,
-    "pr": 9,
+    "pr": null,
     "note": "Sub-step of R2.9: 444 -> 326 collected tests after retiring pvdaq_ingestion/record_pipeline/build_envelope (4 new guard tests added). See .github/workflows/ci.yml MIN_EXPECTED_TESTS history."
   },
   "R2.9b": {
@@ -24,7 +24,7 @@
     "repo": "ingestion-func",
     "state": "merged",
     "branch": null,
-    "pr": 9,
+    "pr": null,
     "paths": [".github/workflows/ci.yml"],
     "note": "Merged in ingestion PR #9."
   },
@@ -34,7 +34,7 @@
     "branch": null,
     "pr": null,
     "paths": [".github/workflows/ci.yml"],
-    "note": "Merged in ingestion PR."
+    "note": "Merged in ingestion PR ."
   },
   "R3.7b": {
     "repo": "processing-func",
