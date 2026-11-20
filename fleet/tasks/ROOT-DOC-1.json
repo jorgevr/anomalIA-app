@@ -10,8 +10,7 @@
   "allowed_paths": [
     "docs/adr/*",
     "docs/contracts.md",
-    "docs/contract-migration.md",
-    "contracts/examples/**"
+    "docs/contract-migration.md"
   ],
   "acceptance": [
     {

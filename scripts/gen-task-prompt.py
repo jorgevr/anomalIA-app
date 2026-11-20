@@ -6,12 +6,15 @@ tools/fleet/runner.py hands the agent exactly one message: "Read <prompt_path>
 and follow it exactly from start to finish." (send_kickoff_prompt) -- the prompt
 file is the agent's entire brief, so this fills a task's "paste prompt here"
 placeholder deterministically from its own schema-validated fields
-(allowed_paths, acceptance, needs, notes, risk, model, max_turns) instead of a
+(allowed_paths, acceptance, needs, notes, risk, max_turns) instead of a
 human retyping them by hand and risking drift from the task file fleet.py and
 the runner actually enforce. Every field the agent needs is inlined into the
 prompt text itself -- the agent is never told to go read fleet/tasks/<id>.json,
 since the prompt (not the task file) is its entire brief (docs/fleet.md: "Read
-<prompt_path> and follow it exactly from start to finish").
+<prompt_path> and follow it exactly from start to finish"). "model" is read
+and validated like every other field, but deliberately left out of the
+rendered prompt: it is the orchestrator's own dispatch metadata (which CLI/
+model tier launches this task), not an instruction for the agent to act on.
 
 Supersedes the old scripts/gen-coordinator-prompt.sh, which generated a prompt
 for a hand-rolled "Orca Coordinator" issuing `orca orchestration ...` CLI calls
@@ -48,31 +51,6 @@ REPO_LABELS = {
     "ingestion-func": "services/ingestion-func (Python 3.11, Azure Functions v4)",
     "processing-func": "services/processing-func (.NET 10 Isolated Worker)",
     "sandbox": "jorgevr/fleet-sandbox (disposable -- never root/ingestion-func/processing-func)",
-}
-
-# Model tier letters are an orchestrator shorthand (fleet/schemas/task.v1.json
-# "model"), not a model name -- docs/agent-fleet.md section 2 is the only place
-# that maps them to what actually runs. Spelled out here so a bare "C" in a
-# prompt never leaves the agent (or a human skimming the prompt) guessing what
-# tier it is or why that tier was picked for this task. A task.json "model"
-# that isn't one of these three letters is already a real model identifier, so
-# it is rendered as-is.
-MODEL_TIERS = {
-    "A": (
-        "Tier A -- Frontier Reasoning (docs/agent-fleet.md section 2): premium cloud models "
-        "(Claude 3.5 Sonnet / Claude Pro / GPT-4o). For architecture, task decomposition, "
-        "contract ownership, complex cross-repo analysis."
-    ),
-    "B": (
-        "Tier B -- Coding (docs/agent-fleet.md section 2): premium cloud models "
-        "(Claude 3.5 Sonnet / GPT-4o). For feature implementation, refactoring, and satisfying "
-        "failing test suites."
-    ),
-    "C": (
-        "Tier C -- Fast/Cheap/Local (docs/agent-fleet.md section 2): local, zero-cost models "
-        "(Ollama qwen2.5-coder:14b, deepseek-coder). For structural unit/integration test "
-        "authoring, deterministic linting, style & diff audits."
-    ),
 }
 
 # Hard-denied regardless of allowed_paths, no exceptions, no escape hatch.
@@ -121,13 +99,6 @@ def validate_registry() -> None:
             "tools/fleet/fleet.py validate failed (see above) -- fix the task "
             "registry before generating a prompt from it."
         )
-
-
-def describe_model(model: str) -> str:
-    tier = MODEL_TIERS.get(model)
-    if tier is None:
-        return model
-    return f"{model} ({tier})"
 
 
 def workflows_rule(allowed_paths: list[str]) -> str:
@@ -184,7 +155,7 @@ def render(task: dict) -> str:
 
 Repo: {REPO_LABELS.get(repo, repo)}
 Branch: `{task['branch']}` (base: `{task.get('base', 'main')}`)
-Risk tier: {task['risk']} | Model: {describe_model(task['model'])} | Turn budget: {task['max_turns']}
+Risk tier: {task['risk']} | Turn budget: {task['max_turns']}
 (stop and report if you will not finish within the turn budget -- do not keep going past it)
 
 ## Read first

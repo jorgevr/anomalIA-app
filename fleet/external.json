@@ -22,10 +22,10 @@
   },
   "R2.9c": {
     "repo": "ingestion-func",
-    "state": "open",
+    "state": "merged",
     "branch": null,
     "pr": null,
     "paths": [".github/workflows/ci.yml"],
-    "note": "Sub-step of R2.9: 329 -> 332, 3 new coverage tests for http_retry.py/observability.py/config.py, which bumped MIN_EXPECTED_TESTS in .github/workflows/ci.yml. Tracked here as still 'open' so fleet.py plan demonstrates flagging a fleet task (CI-4) whose allowed_paths overlaps an open external item's declared paths in the same repo."
+    "note": "Sub-step of R2.9: 329 -> 332, 3 new coverage tests for http_retry.py/observability.py/config.py, which bumped MIN_EXPECTED_TESTS in .github/workflows/ci.yml. Merged -- no longer conflicts with CI-4's work on .github/workflows/ci.yml."
   }
 }

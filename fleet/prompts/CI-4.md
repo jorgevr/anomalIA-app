@@ -2,7 +2,7 @@
 
 Repo: services/ingestion-func (Python 3.11, Azure Functions v4)
 Branch: `ci-4-ruff-format-ci-gate` (base: `main`)
-Risk tier: ci | Model: C (Tier C -- Fast/Cheap/Local (docs/agent-fleet.md section 2): local, zero-cost models (Ollama qwen2.5-coder:14b, deepseek-coder). For structural unit/integration test authoring, deterministic linting, style & diff audits.) | Turn budget: 20
+Risk tier: ci | Turn budget: 20
 (stop and report if you will not finish within the turn budget -- do not keep going past it)
 
 ## Read first
@@ -29,7 +29,7 @@ orchestrator reruns them independently afterward and does not take your word for
 - **pytest** (cwd `.`): `pytest` -- must exit 0
 
 ## Operational notes
-- Must not run concurrently with any task or external work item that touches .github/workflows/ci.yml -- see fleet/external.json, entry R2.9c, which fleet.py plan flags against this task's allowed_paths.
+None.
 
 ## Hard rules (non-negotiable)
 - Local commits only, on `ci-4-ruff-format-ci-gate`. Never push, never open a PR, never touch `main`.

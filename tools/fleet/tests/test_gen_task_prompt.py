@@ -1,10 +1,11 @@
 """Tests for scripts/gen-task-prompt.py's render() (the fix described in the
 fleet-prompt-fix task): the prompt must inline everything the worker needs
-instead of pointing it at fleet/tasks/<id>.json, must spell out what a model
-tier letter actually means, and must get the `.github/workflows/**` hard-deny
-rule right for a task like CI-4 that names an exact workflow file in its own
-allowed_paths -- the old render() denied every workflow file unconditionally,
-contradicting docs/fleet.md's own documented escape hatch.
+instead of pointing it at fleet/tasks/<id>.json, must never leak the
+orchestrator's own "model" dispatch metadata into the agent's instructions,
+and must get the `.github/workflows/**` hard-deny rule right for a task like
+CI-4 that names an exact workflow file in its own allowed_paths -- the old
+render() denied every workflow file unconditionally, contradicting
+docs/fleet.md's own documented escape hatch.
 
 scripts/gen-task-prompt.py is a standalone script (hyphenated filename, not an
 importable package), so it is loaded the same way conftest.py loads fleet.py.
@@ -73,25 +74,18 @@ def test_render_inlines_branch_needs_allowed_paths_and_acceptance(gen):
     assert "`pytest` -- must exit 0" in out  # acceptance
 
 
-# --- model tier letters are spelled out, not left as a bare letter ------------------
+# --- "model" is orchestrator dispatch metadata, never rendered into the prompt -----
 
 
-def test_describe_model_known_tier_is_spelled_out(gen):
-    assert gen.describe_model("A") != "A"
-    out = gen.describe_model("C")
-    assert out.startswith("C (")
-    assert "Tier C" in out
-    assert "Ollama" in out
-
-
-def test_describe_model_unknown_value_passed_through(gen):
-    assert gen.describe_model("claude-sonnet-5") == "claude-sonnet-5"
-
-
-def test_render_model_line_is_not_a_bare_letter(gen):
-    out = gen.render(_task(model="C"))
-    assert "Model: C (" in out
-    assert "Model: C\n" not in out and "Model: C |" not in out
+def test_render_never_mentions_model(gen):
+    # "A"/"B"/"C" are single letters that legitimately occur elsewhere in the
+    # rendered text (e.g. "AGENTS.md"), so only the distinctive multi-char
+    # model id is checked for a literal leak; the "Model" header word itself
+    # covers the tier-letter cases.
+    for model in ("A", "B", "C", "claude-sonnet-5"):
+        out = gen.render(_task(model=model))
+        assert "Model" not in out
+    assert "claude-sonnet-5" not in gen.render(_task(model="claude-sonnet-5"))
 
 
 # --- .github/workflows/** hard-deny rule, including CI-4's exact-file exception -----

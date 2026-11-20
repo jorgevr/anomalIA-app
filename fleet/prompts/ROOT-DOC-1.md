@@ -2,7 +2,7 @@
 
 Repo: workspace root
 Branch: `root-doc-1-contract-migration-update` (base: `main`)
-Risk tier: docs | Model: A (Tier A -- Frontier Reasoning (docs/agent-fleet.md section 2): premium cloud models (Claude 3.5 Sonnet / Claude Pro / GPT-4o). For architecture, task decomposition, contract ownership, complex cross-repo analysis.) | Turn budget: 15
+Risk tier: docs | Turn budget: 15
 (stop and report if you will not finish within the turn budget -- do not keep going past it)
 
 ## Read first
@@ -14,7 +14,6 @@ how related it looks:
 - `docs/adr/*`
 - `docs/contracts.md`
 - `docs/contract-migration.md`
-- `contracts/examples/**`
 
 Touching anything outside this list gets this task marked `rejected` even if every
 check below passes.

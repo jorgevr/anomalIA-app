@@ -32,10 +32,7 @@
     }
   ],
   "prompt_file": "fleet/prompts/CI-4.md",
-  "model": "C",
+  "model": "B",
   "max_turns": 20,
-  "risk": "ci",
-  "notes": [
-    "Must not run concurrently with any task or external work item that touches .github/workflows/ci.yml -- see fleet/external.json, entry R2.9c, which fleet.py plan flags against this task's allowed_paths."
-  ]
+  "risk": "ci"
 }
