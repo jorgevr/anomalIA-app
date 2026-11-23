@@ -1,24 +1,24 @@
 {
   "R2.9": {
     "repo": "ingestion-func",
-    "state": "open",
+    "state": "merged",
     "branch": null,
     "pr": null,
-    "note": "Retired the legacy per-record pipeline (pvdaq_ingestion/record_pipeline/build_envelope) and its idempotency store; the historical-only dispatcher/worker pair remains (ingestion-func AGENTS.md section 2). Landed on main before this fleet tracked anything, but is tracked here as 'open' until a human has explicitly reviewed and flipped it to 'merged' -- see docs/fleet.md. Flip by hand once confirmed."
+    "note": "Retired the legacy per-record pipeline (pvdaq_ingestion/record_pipeline/build_envelope) and its idempotency store; the historical-only dispatcher/worker pair remains (ingestion-func AGENTS.md section 2). Merged in ingestion PR #9."
   },
   "R2.9a": {
     "repo": "ingestion-func",
     "state": "merged",
     "branch": null,
     "pr": null,
-    "note": "Sub-step of R2.9: 444 -> 326 collected tests after retiring pvdaq_ingestion/record_pipeline/build_envelope (4 new guard tests added). See .github/workflows/ci.yml MIN_EXPECTED_TESTS history."
+    "note": "Sub-step of R2.9: 444 -> 326 collected tests after retiring pvdaq_ingestion/record_pipeline/build_envelope (4 new guard tests added). See .github/workflows/ci.yml MIN_EXPECTED_TESTS history. Merged in ingestion PR #9."
   },
   "R2.9b": {
     "repo": "ingestion-func",
     "state": "merged",
     "branch": null,
     "pr": null,
-    "note": "Sub-step of R2.9: 326 -> 329, 3 new hygiene tests added."
+    "note": "Sub-step of R2.9: 326 -> 329, 3 new hygiene tests added. Merged in ingestion PR #9."
   },
   "R2.9c": {
     "repo": "ingestion-func",
@@ -26,6 +26,27 @@
     "branch": null,
     "pr": null,
     "paths": [".github/workflows/ci.yml"],
-    "note": "Sub-step of R2.9: 329 -> 332, 3 new coverage tests for http_retry.py/observability.py/config.py, which bumped MIN_EXPECTED_TESTS in .github/workflows/ci.yml. Merged -- no longer conflicts with CI-4's work on .github/workflows/ci.yml."
+    "note": "Sub-step of R2.9: 329 -> 332, 3 new coverage tests for http_retry.py/observability.py/config.py, which bumped MIN_EXPECTED_TESTS in .github/workflows/ci.yml. Merged in ingestion PR #9 -- no longer conflicts with CI-4's work on .github/workflows/ci.yml."
+  },
+  "R2.11": {
+    "repo": "ingestion-func",
+    "state": "merged",
+    "branch": null,
+    "pr": null,
+    "note": "Deleted the orphaned csv_normalizer module and its test. Merged in ingestion PR #10."
+  },
+  "R3.7b": {
+    "repo": "processing-func",
+    "state": "merged",
+    "branch": null,
+    "pr": null,
+    "note": "Asserted the exception classifier against the Service Bus SDK's real hierarchy. Merged in processing PR #46."
+  },
+  "CI-4": {
+    "repo": "ingestion-func",
+    "state": "merged",
+    "branch": null,
+    "pr": null,
+    "note": "Reformatted test_adls_store.py and gated CI on ruff format --check. Merged in ingestion PR #11."
   }
 }

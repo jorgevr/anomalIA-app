@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent.parent.parent / "scripts" / "gen-task-prompt.py"
-TASKS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "fleet" / "tasks"
+DONE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "fleet" / "done"
 
 
 @pytest.fixture
@@ -119,8 +119,9 @@ def test_no_exact_workflow_file_stays_fully_denied(gen):
 
 def test_ci4_task_file_matches_this_contract(gen):
     """Guards against CI-4.json itself drifting away from the scenario this task
-    exists to cover (its allowed_paths must still name the workflow file verbatim)."""
-    task = json.loads((TASKS_DIR / "CI-4.json").read_text(encoding="utf-8"))
+    exists to cover (its allowed_paths must still name the workflow file verbatim).
+    CI-4 shipped and lives in fleet/done/ now, not fleet/tasks/."""
+    task = json.loads((DONE_DIR / "CI-4.json").read_text(encoding="utf-8"))
     assert ".github/workflows/ci.yml" in task["allowed_paths"]
     out = gen.render(task)
     assert OLD_ABSOLUTE_SENTENCE_FRAGMENT not in out
