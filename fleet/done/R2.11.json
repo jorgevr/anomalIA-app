@@ -25,7 +25,7 @@
       "expect_exit": 0
     }
   ],
-  "prompt_file": "fleet/prompts/R2.11.md",
+  "prompt_file": "fleet/done/R2.11.md",
   "model": "B",
   "max_turns": 20,
   "risk": "code"

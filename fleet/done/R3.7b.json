@@ -29,7 +29,7 @@
       "expect_exit": 0
     }
   ],
-  "prompt_file": "fleet/prompts/R3.7b.md",
+  "prompt_file": "fleet/done/R3.7b.md",
   "model": "B",
   "max_turns": 40,
   "risk": "code"
