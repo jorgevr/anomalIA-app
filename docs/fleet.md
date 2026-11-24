@@ -38,6 +38,18 @@ not run concurrently with X" that isn't mechanically enforced — `fleet.py` nev
 fuller per-pane CLI/fencing design lives in the historical `.fleet/panes.md` note referenced from
 `docs/agent-fleet.md`'s "herdr pane" column).
 
+## Finished tasks (`fleet/done/`)
+
+Once a task has actually shipped (its branch merged), a human moves its task file and its
+prompt file — `git mv fleet/tasks/<id>.json fleet/prompts/<id>.md` both to `fleet/done/` — and
+adds a corresponding entry to `fleet/external.json` with `state: "merged"`, so any other task's
+`needs` can still resolve against that id without a live file in `fleet/tasks/`. `fleet.py
+validate`/`plan` only scan `fleet/tasks/`, so a file under `fleet/done/` is no longer
+schema-checked, is not part of the needs graph, and is excluded from path-overlap checks — it's
+a historical record, not something `fleet.py` reasons about. Its `prompt_file` field is left
+pointing at the task's own now-archived prompt alongside it (`fleet/done/<id>.md`), not the
+original `fleet/prompts/` location, since that's where the pair actually lives now.
+
 ## External work (`fleet/external.json`, `fleet/schemas/external.v1.json`)
 
 The fleet's own hand-maintained registry of work that a `needs` can point to without that work
